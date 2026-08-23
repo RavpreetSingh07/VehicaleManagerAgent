@@ -3,7 +3,6 @@ import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  ImageBackground,
   Pressable,
   StyleSheet,
   Text,
@@ -71,12 +70,7 @@ export default function HomeScreen() {
         <Pressable
           onPress={() => router.push('/vehicle/details')}
         >
-          <ImageBackground
-            source={require('')}
-            style={styles.card}
-            imageStyle={styles.cardImage}
-            resizeMode="cover"
-          >
+          <View style={styles.card}>
             <View style={styles.cardContent}>
               <Text style={styles.vehicleName}>
                 {vehicle.vehicle_name}
@@ -94,7 +88,7 @@ export default function HomeScreen() {
                 Tap to view details →
               </Text>
             </View>
-          </ImageBackground>
+          </View>
         </Pressable>
       ) : (
         <View style={styles.emptyCard}>
@@ -164,16 +158,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
   },
 
-  cardImage: {
-    borderRadius: 25,
-  },
-
   cardContent: {
     flex: 1,
     justifyContent: 'center',
-    width: '55%',
     paddingLeft: 25,
-    paddingRight: 10,
+    paddingRight: 25,
   },
 
   vehicleName: {
