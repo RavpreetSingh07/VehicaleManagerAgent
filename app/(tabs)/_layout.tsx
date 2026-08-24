@@ -18,6 +18,8 @@ export default function TabLayout() {
         tabBarButton: HapticTab,
       }}
     >
+      {/* HOME */}
+
       <Tabs.Screen
         name="index"
         options={{
@@ -32,6 +34,24 @@ export default function TabLayout() {
         }}
       />
 
+      {/* FUEL */}
+
+      <Tabs.Screen
+        name="explore"
+        options={{
+          title: 'Fuel',
+          tabBarIcon: ({ color }) => (
+            <IconSymbol
+              size={28}
+              name="drop.fill"
+              color={color}
+            />
+          ),
+        }}
+      />
+
+      {/* YOU */}
+
       <Tabs.Screen
         name="you"
         options={{
@@ -43,13 +63,6 @@ export default function TabLayout() {
               color={color}
             />
           ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="explore"
-        options={{
-          href: null,
         }}
       />
     </Tabs>
