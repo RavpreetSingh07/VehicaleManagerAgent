@@ -1,15 +1,15 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
@@ -18,7 +18,8 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] =
+    useState(false);
 
   const signup = async () => {
     if (!email || !password || !confirmPassword) {
@@ -69,7 +70,7 @@ export default function SignupScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
+      style={{ flex: 1, backgroundColor: '#000000' }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
@@ -89,6 +90,7 @@ export default function SignupScreen() {
         <TextInput
           style={styles.input}
           placeholder="Enter your email"
+          placeholderTextColor="#555555"
           value={email}
           onChangeText={setEmail}
           keyboardType="email-address"
@@ -102,6 +104,7 @@ export default function SignupScreen() {
           <TextInput
             style={styles.passwordInput}
             placeholder="Create a password"
+            placeholderTextColor="#555555"
             value={password}
             onChangeText={setPassword}
             secureTextEntry={!showPassword}
@@ -122,6 +125,7 @@ export default function SignupScreen() {
           <TextInput
             style={styles.passwordInput}
             placeholder="Enter password again"
+            placeholderTextColor="#555555"
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry={!showConfirmPassword}
@@ -162,57 +166,59 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    backgroundColor: '#F2F2F2',
+    backgroundColor: '#000000',
     padding: 25,
     justifyContent: 'center',
   },
 
   logo: {
     fontSize: 52,
-    fontWeight: '800',
+    fontWeight: '900',
     textAlign: 'center',
-    color: '#111111',
+    color: '#FFFFFF',
     marginBottom: 20,
+    letterSpacing: 3,
   },
 
   title: {
     fontSize: 30,
-    fontWeight: '700',
+    fontWeight: '800',
     textAlign: 'center',
-    color: '#111111',
+    color: '#FFFFFF',
   },
 
   subtitle: {
     fontSize: 16,
-    color: '#666666',
+    color: '#777777',
     textAlign: 'center',
     marginTop: 8,
     marginBottom: 25,
   },
 
   label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111111',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
     marginBottom: 8,
     marginTop: 15,
   },
 
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#111111',
     borderWidth: 1,
-    borderColor: '#D0D0D0',
+    borderColor: '#292929',
     borderRadius: 14,
     padding: 16,
     fontSize: 16,
+    color: '#FFFFFF',
   },
 
   passwordContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#111111',
     borderWidth: 1,
-    borderColor: '#D0D0D0',
+    borderColor: '#292929',
     borderRadius: 14,
     paddingLeft: 16,
   },
@@ -221,16 +227,17 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 16,
     fontSize: 16,
+    color: '#FFFFFF',
   },
 
   eyeText: {
     paddingHorizontal: 16,
     fontWeight: '600',
-    color: '#333333',
+    color: '#FFFFFF',
   },
 
   button: {
-    backgroundColor: '#333333',
+    backgroundColor: '#FFFFFF',
     padding: 17,
     borderRadius: 14,
     alignItems: 'center',
@@ -238,15 +245,15 @@ const styles = StyleSheet.create({
   },
 
   buttonText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '800',
   },
 
   loginText: {
     textAlign: 'center',
     marginTop: 25,
-    color: '#333333',
+    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '600',
   },

@@ -9,82 +9,172 @@ import {
   Text,
   View,
 } from 'react-native';
+
 import { supabase } from '../../lib/supabase';
 
 export default function HomeScreen() {
   const [vehicle, setVehicle] = useState<any>(null);
+  const [fuelEntries, setFuelEntries] = useState<any[]>([]);
+  const [serviceEntries, setServiceEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadVehicle = async () => {
+  const loadDashboard = async () => {
     setLoading(true);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    if (!user) {
-      router.replace('/auth/login');
-      return;
+      if (!user) {
+        router.replace('/auth/login');
+        return;
+      }
+
+      // VEHICLE
+
+      const { data: vehicleData, error: vehicleError } =
+        await supabase
+          .from('vehicles')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+      if (vehicleError) {
+        console.log(
+          'Vehicle loading error:',
+          vehicleError.message
+        );
+      }
+
+      setVehicle(vehicleData || null);
+
+      // FUEL
+
+      const { data: fuelData, error: fuelError } =
+        await supabase
+          .from('fuel_entries')
+          .select(
+            'id, fuel_litres, fuel_cost, distance_km, mileage, created_at'
+          )
+          .eq('user_id', user.id)
+          .order('created_at', {
+            ascending: false,
+          });
+
+      if (fuelError) {
+        console.log(
+          'Fuel loading error:',
+          fuelError.message
+        );
+      }
+
+      setFuelEntries(fuelData || []);
+
+      // SERVICE
+
+      const { data: serviceData, error: serviceError } =
+        await supabase
+          .from('service_entries')
+          .select(
+            'id, service_date, service_km, service_type, service_cost'
+          )
+          .eq('user_id', user.id)
+          .order('service_date', {
+            ascending: false,
+          });
+
+      if (serviceError) {
+        console.log(
+          'Service loading error:',
+          serviceError.message
+        );
+      }
+
+      setServiceEntries(serviceData || []);
+    } catch (error) {
+      console.log('Dashboard error:', error);
     }
 
-    const { data, error } = await supabase
-      .from('vehicles')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.log('Vehicle loading error:', error.message);
-    }
-
-    setVehicle(data || null);
     setLoading(false);
   };
 
   useFocusEffect(
     useCallback(() => {
-      loadVehicle();
+      loadDashboard();
     }, [])
   );
 
-  /*
-   * CALCULATION FUNCTIONS
-   * These are ready for when we connect
-   * fuel/service records to the dashboard.
-   */
+  // FUEL CALCULATIONS
 
-  const calculateMileage = (
-    previousKm: number,
-    currentKm: number,
-    fuelUsed: number
-  ) => {
-    if (fuelUsed <= 0 || currentKm <= previousKm) {
-      return 0;
-    }
+  const totalFuel = fuelEntries.reduce(
+    (sum, entry) =>
+      sum + Number(entry.fuel_litres || 0),
+    0
+  );
 
-    const distance = currentKm - previousKm;
+  const totalFuelCost = fuelEntries.reduce(
+    (sum, entry) =>
+      sum + Number(entry.fuel_cost || 0),
+    0
+  );
 
-    return distance / fuelUsed;
-  };
+  const totalDistance = fuelEntries.reduce(
+    (sum, entry) =>
+      sum + Number(entry.distance_km || 0),
+    0
+  );
 
-  const calculateTotalExpense = (
-    fuel: number,
-    service: number,
-    repairs: number
-  ) => {
-    return fuel + service + repairs;
-  };
+  const averageMileage =
+    totalFuel > 0
+      ? totalDistance / totalFuel
+      : 0;
 
-  const formatCurrency = (amount: number) => {
-    return `₹${amount.toLocaleString('en-IN')}`;
-  };
+  // SERVICE CALCULATIONS
+
+  const totalServiceCost = serviceEntries.reduce(
+    (sum, entry) =>
+      sum + Number(entry.service_cost || 0),
+    0
+  );
+
+  const totalExpense =
+    totalFuelCost + totalServiceCost;
+
+  const lastService =
+    serviceEntries.length > 0
+      ? serviceEntries[0]
+      : null;
+
+  const currentKm =
+    Number(vehicle?.current_km) || 0;
+
+  const lastServiceKm =
+    Number(vehicle?.last_service_km) || 0;
+
+  const serviceInterval = 5000;
+
+  const nextServiceKm =
+    lastServiceKm > 0
+      ? lastServiceKm + serviceInterval
+      : 0;
+
+  const remainingServiceKm =
+    nextServiceKm > 0
+      ? Math.max(nextServiceKm - currentKm, 0)
+      : 0;
+
+  // LOADING
 
   if (loading) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#FFFFFF" />
+        <ActivityIndicator
+          size="large"
+          color="#FFFFFF"
+        />
       </View>
     );
   }
@@ -95,20 +185,32 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+
         {/* HEADER */}
 
         <View style={styles.header}>
           <View>
-            <Text style={styles.brand}>VMA</Text>
-            <Text style={styles.connected}>CONNECTED</Text>
+            <Text style={styles.brand}>
+              VMA
+            </Text>
+
+            <Text style={styles.connected}>
+              CONNECTED
+            </Text>
           </View>
 
-          <Pressable style={styles.notificationButton}>
-            <Text style={styles.notificationIcon}>♧</Text>
-          </Pressable>
+          {/* ORIGINAL WHITE DOT */}
+
+          <View style={styles.statusCircle}>
+            <View style={styles.statusDot} />
+          </View>
         </View>
 
-        <Text style={styles.greeting}>Good morning 👋</Text>
+        {/* GREETING */}
+
+        <Text style={styles.greeting}>
+          Good morning 👋
+        </Text>
 
         <Text style={styles.welcomeText}>
           Everything about your vehicle,
@@ -120,13 +222,17 @@ export default function HomeScreen() {
         {vehicle ? (
           <Pressable
             style={styles.vehicleCard}
-            onPress={() => router.push('/vehicle/details')}
+            onPress={() =>
+              router.push('/vehicle/details')
+            }
           >
             <View style={styles.vehicleGlow} />
 
             <View style={styles.vehicleTop}>
               <View>
-                <Text style={styles.vehicleLabel}>YOUR VEHICLE</Text>
+                <Text style={styles.vehicleLabel}>
+                  YOUR VEHICLE
+                </Text>
 
                 <Text style={styles.vehicleName}>
                   {vehicle.vehicle_name}
@@ -138,14 +244,18 @@ export default function HomeScreen() {
               </View>
 
               <View style={styles.arrowCircle}>
-                <Text style={styles.arrow}>›</Text>
+                <Text style={styles.arrow}>
+                  ›
+                </Text>
               </View>
             </View>
 
             <View style={styles.vehicleBottom}>
               <View>
                 <Text style={styles.kmValue}>
-                  {vehicle.current_km ?? '-'}
+                  {currentKm
+                    ? currentKm.toLocaleString()
+                    : '--'}
                 </Text>
 
                 <Text style={styles.kmLabel}>
@@ -154,7 +264,7 @@ export default function HomeScreen() {
               </View>
 
               <View style={styles.vehicleStatus}>
-                <View style={styles.statusDot} />
+                <View style={styles.activeDot} />
 
                 <Text style={styles.statusText}>
                   Active
@@ -165,24 +275,29 @@ export default function HomeScreen() {
         ) : (
           <Pressable
             style={styles.emptyCard}
-            onPress={() => router.push('/vehicle/add')}
+            onPress={() =>
+              router.push('/vehicle/add')
+            }
           >
-            <Text style={styles.emptyIcon}>＋</Text>
+            <Text style={styles.emptyIcon}>
+              ＋
+            </Text>
 
             <Text style={styles.emptyTitle}>
               Add your vehicle
             </Text>
 
             <Text style={styles.emptyText}>
-              Start managing your vehicle with VMA.
+              Start managing your vehicle
+              with VMA.
             </Text>
           </Pressable>
         )}
 
-        {/* QUICK INFORMATION */}
-
         {vehicle && (
           <>
+            {/* VEHICLE OVERVIEW */}
+
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>
                 Vehicle Overview
@@ -194,14 +309,21 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.grid}>
+
               {/* SERVICE */}
 
               <Pressable
                 style={styles.infoCard}
-                onPress={() => router.push('/vehicle/details')}
+                onPress={() =>
+                  router.push(
+                    '/vehicle/details'
+                  )
+                }
               >
                 <View style={styles.iconBox}>
-                  <Text style={styles.icon}>🔧</Text>
+                  <Text style={styles.icon}>
+                    🔧
+                  </Text>
                 </View>
 
                 <Text style={styles.infoTitle}>
@@ -209,11 +331,15 @@ export default function HomeScreen() {
                 </Text>
 
                 <Text style={styles.infoValue}>
-                  Track
+                  {nextServiceKm > 0
+                    ? `${remainingServiceKm.toLocaleString()} km`
+                    : 'Not set'}
                 </Text>
 
                 <Text style={styles.infoSub}>
-                  Maintenance
+                  {nextServiceKm > 0
+                    ? 'until next service'
+                    : 'Add service record'}
                 </Text>
               </Pressable>
 
@@ -221,10 +347,14 @@ export default function HomeScreen() {
 
               <Pressable
                 style={styles.infoCard}
-                onPress={() => router.push('/vehicle/details')}
+                onPress={() =>
+                  router.push('/explore')
+                }
               >
                 <View style={styles.iconBox}>
-                  <Text style={styles.icon}>⛽</Text>
+                  <Text style={styles.icon}>
+                    ⛽
+                  </Text>
                 </View>
 
                 <Text style={styles.infoTitle}>
@@ -232,11 +362,13 @@ export default function HomeScreen() {
                 </Text>
 
                 <Text style={styles.infoValue}>
-                  Mileage
+                  {averageMileage > 0
+                    ? `${averageMileage.toFixed(2)} km/L`
+                    : 'No data'}
                 </Text>
 
                 <Text style={styles.infoSub}>
-                  Coming soon
+                  Average mileage
                 </Text>
               </Pressable>
 
@@ -244,10 +376,16 @@ export default function HomeScreen() {
 
               <Pressable
                 style={styles.infoCard}
-                onPress={() => router.push('/vehicle/details')}
+                onPress={() =>
+                  router.push(
+                    '/vehicle/documents'
+                  )
+                }
               >
                 <View style={styles.iconBox}>
-                  <Text style={styles.icon}>📄</Text>
+                  <Text style={styles.icon}>
+                    📄
+                  </Text>
                 </View>
 
                 <Text style={styles.infoTitle}>
@@ -267,10 +405,14 @@ export default function HomeScreen() {
 
               <Pressable
                 style={styles.infoCard}
-                onPress={() => router.push('/vehicle/details')}
+                onPress={() =>
+                  router.push('/explore')
+                }
               >
                 <View style={styles.iconBox}>
-                  <Text style={styles.icon}>₹</Text>
+                  <Text style={styles.icon}>
+                    ₹
+                  </Text>
                 </View>
 
                 <Text style={styles.infoTitle}>
@@ -278,16 +420,123 @@ export default function HomeScreen() {
                 </Text>
 
                 <Text style={styles.infoValue}>
-                  Track
+                  {totalExpense > 0
+                    ? `₹${totalExpense.toLocaleString(
+                        'en-IN'
+                      )}`
+                    : '₹0'}
                 </Text>
 
                 <Text style={styles.infoSub}>
-                  Fuel • Service • Repairs
+                  Fuel + Service
                 </Text>
               </Pressable>
+
             </View>
 
-            {/* QUICK ACTIONS */}
+            {/* SMART TRACKING */}
+
+            <View style={styles.calculationCard}>
+              <Text style={styles.calculationLabel}>
+                VMA SMART TRACKING
+              </Text>
+
+              <Text style={styles.calculationTitle}>
+                Your vehicle data,
+                {'\n'}turned into insights.
+              </Text>
+
+              <View style={styles.calculationRow}>
+
+                <View style={styles.statBlock}>
+                  <Text style={styles.calculationNumber}>
+                    {currentKm
+                      ? currentKm.toLocaleString()
+                      : '--'}
+                  </Text>
+
+                  <Text style={styles.calculationUnit}>
+                    KM TRACKED
+                  </Text>
+                </View>
+
+                <View style={styles.calculationDivider} />
+
+                <View style={styles.statBlock}>
+                  <Text style={styles.calculationNumber}>
+                    {averageMileage > 0
+                      ? averageMileage.toFixed(1)
+                      : '--'}
+                  </Text>
+
+                  <Text style={styles.calculationUnit}>
+                    KM/L
+                  </Text>
+                </View>
+
+                <View style={styles.calculationDivider} />
+
+                <View style={styles.statBlock}>
+                  <Text style={styles.calculationNumber}>
+                    {totalExpense > 0
+                      ? `₹${(
+                          totalExpense / 1000
+                        ).toFixed(1)}K`
+                      : '--'}
+                  </Text>
+
+                  <Text style={styles.calculationUnit}>
+                    EXPENSE
+                  </Text>
+                </View>
+
+              </View>
+            </View>
+
+            {/* RECENT ACTIVITY */}
+
+            <View style={styles.recentHeader}>
+              <Text style={styles.sectionTitle}>
+                Recent Activity
+              </Text>
+            </View>
+
+            {lastService ? (
+              <View style={styles.activityCard}>
+                <View style={styles.activityIcon}>
+                  <Text style={styles.activityEmoji}>
+                    🔧
+                  </Text>
+                </View>
+
+                <View style={styles.activityInfo}>
+                  <Text style={styles.activityTitle}>
+                    {lastService.service_type}
+                  </Text>
+
+                  <Text style={styles.activitySub}>
+                    {Number(
+                      lastService.service_km
+                    ).toLocaleString()} km
+                  </Text>
+                </View>
+
+                <Text style={styles.activityCost}>
+                  ₹
+                  {Number(
+                    lastService.service_cost
+                  ).toLocaleString('en-IN')}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.noActivity}>
+                <Text style={styles.noActivityText}>
+                  No service activity yet.
+                </Text>
+              </View>
+            )}
+
+            {/* QUICK ACTION */}
 
             <Text style={styles.sectionTitle}>
               Quick Actions
@@ -295,10 +544,14 @@ export default function HomeScreen() {
 
             <Pressable
               style={styles.addButton}
-              onPress={() => router.push('/vehicle/add')}
+              onPress={() =>
+                router.push('/vehicle/add')
+              }
             >
               <View style={styles.plusCircle}>
-                <Text style={styles.plus}>+</Text>
+                <Text style={styles.plus}>
+                  +
+                </Text>
               </View>
 
               <View style={styles.addButtonText}>
@@ -318,64 +571,10 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* CALCULATION PREVIEW */}
-
-        {vehicle && (
-          <View style={styles.calculationCard}>
-            <Text style={styles.calculationLabel}>
-              VMA SMART TRACKING
-            </Text>
-
-            <Text style={styles.calculationTitle}>
-              Your vehicle data will become
-              useful insights.
-            </Text>
-
-            <View style={styles.calculationRow}>
-              <View>
-                <Text style={styles.calculationNumber}>
-                  {vehicle.current_km ?? 0}
-                </Text>
-
-                <Text style={styles.calculationUnit}>
-                  KM tracked
-                </Text>
-              </View>
-
-              <View style={styles.calculationDivider} />
-
-              <View>
-                <Text style={styles.calculationNumber}>
-                  —
-                </Text>
-
-                <Text style={styles.calculationUnit}>
-                  km/L mileage
-                </Text>
-              </View>
-
-              <View style={styles.calculationDivider} />
-
-              <View>
-                <Text style={styles.calculationNumber}>
-                  —
-                </Text>
-
-                <Text style={styles.calculationUnit}>
-                  total expense
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
       </ScrollView>
     </View>
   );
 }
-
-/* ------------------------------------------------ */
-/* STYLES */
-/* ------------------------------------------------ */
 
 const styles = StyleSheet.create({
   container: {
@@ -419,7 +618,7 @@ const styles = StyleSheet.create({
     marginTop: -3,
   },
 
-  notificationButton: {
+  statusCircle: {
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -430,9 +629,11 @@ const styles = StyleSheet.create({
     borderColor: '#292929',
   },
 
-  notificationIcon: {
-    color: '#FFFFFF',
-    fontSize: 22,
+  statusDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: '#FFFFFF',
   },
 
   greeting: {
@@ -543,7 +744,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
   },
 
-  statusDot: {
+  activeDot: {
     width: 7,
     height: 7,
     borderRadius: 4,
@@ -651,7 +852,7 @@ const styles = StyleSheet.create({
 
   infoValue: {
     color: '#FFFFFF',
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: '700',
     marginTop: 4,
   },
@@ -662,7 +863,129 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  /* ADD BUTTON */
+  /* SMART TRACKING */
+
+  calculationCard: {
+    backgroundColor: '#111111',
+    borderRadius: 25,
+    padding: 22,
+    marginTop: 18,
+    borderWidth: 1,
+    borderColor: '#292929',
+  },
+
+  calculationLabel: {
+    color: '#777',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 2,
+  },
+
+  calculationTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 27,
+    marginTop: 9,
+  },
+
+  calculationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 25,
+  },
+
+  statBlock: {
+    flex: 1,
+    alignItems: 'center',
+  },
+
+  calculationNumber: {
+    color: '#FFFFFF',
+    fontSize: 19,
+    fontWeight: '800',
+  },
+
+  calculationUnit: {
+    color: '#666',
+    fontSize: 8,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+
+  calculationDivider: {
+    width: 1,
+    height: 38,
+    backgroundColor: '#333',
+  },
+
+  /* RECENT ACTIVITY */
+
+  recentHeader: {
+    marginTop: 5,
+  },
+
+  activityCard: {
+    backgroundColor: '#111111',
+    borderRadius: 20,
+    padding: 17,
+    borderWidth: 1,
+    borderColor: '#292929',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  activityIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#1C1C1C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  activityEmoji: {
+    fontSize: 20,
+  },
+
+  activityInfo: {
+    flex: 1,
+    marginLeft: 13,
+  },
+
+  activityTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+
+  activitySub: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  activityCost: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  noActivity: {
+    backgroundColor: '#111111',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#292929',
+  },
+
+  noActivityText: {
+    color: '#666',
+    fontSize: 13,
+  },
+
+  /* QUICK ACTION */
 
   addButton: {
     backgroundColor: '#FFFFFF',
@@ -708,56 +1031,5 @@ const styles = StyleSheet.create({
     color: '#111',
     fontSize: 27,
     marginRight: 5,
-  },
-
-  /* CALCULATIONS */
-
-  calculationCard: {
-    backgroundColor: '#111111',
-    borderRadius: 25,
-    padding: 22,
-    marginTop: 30,
-    borderWidth: 1,
-    borderColor: '#292929',
-  },
-
-  calculationLabel: {
-    color: '#777',
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-
-  calculationTitle: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '700',
-    lineHeight: 27,
-    marginTop: 9,
-  },
-
-  calculationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 25,
-  },
-
-  calculationNumber: {
-    color: '#FFFFFF',
-    fontSize: 21,
-    fontWeight: '800',
-  },
-
-  calculationUnit: {
-    color: '#666',
-    fontSize: 9,
-    marginTop: 3,
-  },
-
-  calculationDivider: {
-    width: 1,
-    height: 38,
-    backgroundColor: '#333',
   },
 });
