@@ -60,8 +60,7 @@ export default function HomeScreen() {
   const [vehicleImage, setVehicleImage] =
     useState<string | null>(null);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [loading, setLoading] = useState(true);
 
   // --------------------------------
   // TIME BASED GREETING
@@ -190,7 +189,9 @@ export default function HomeScreen() {
 
     await loadVehicleImage(vehicle);
 
+    // --------------------------------
     // FUEL FOR THIS VEHICLE ONLY
+    // --------------------------------
 
     const {
       data: fuelData,
@@ -219,7 +220,9 @@ export default function HomeScreen() {
       (fuelData || []) as FuelEntry[]
     );
 
+    // --------------------------------
     // SERVICE FOR THIS VEHICLE ONLY
+    // --------------------------------
 
     const {
       data: serviceData,
@@ -499,7 +502,9 @@ export default function HomeScreen() {
         {vehicles.length > 1 && (
           <>
             <View
-              style={styles.vehicleSwitcherHeader}
+              style={
+                styles.vehicleSwitcherHeader
+              }
             >
               <Text
                 style={
@@ -1152,7 +1157,9 @@ export default function HomeScreen() {
             {/* -------------------------------- */}
 
             <View
-              style={styles.recentHeader}
+              style={
+                styles.recentHeader
+              }
             >
               <Text
                 style={
@@ -1308,6 +1315,37 @@ export default function HomeScreen() {
           </>
         )}
       </ScrollView>
+
+      {/* -------------------------------- */}
+      {/* FLOATING VMA AI BUTTON */}
+      {/* -------------------------------- */}
+
+      <Pressable
+        style={styles.aiFloatingButton}
+        onPress={() => router.push('/ai')}
+      >
+        <Text
+          style={styles.aiFloatingIcon}
+        >
+          ✦
+        </Text>
+
+        <View>
+          <Text
+            style={styles.aiFloatingTitle}
+          >
+            VMA AI
+          </Text>
+
+          <Text
+            style={
+              styles.aiFloatingSubtitle
+            }
+          >
+            Ask anything
+          </Text>
+        </View>
+      </Pressable>
     </View>
   );
 }
@@ -1328,7 +1366,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 65,
-    paddingBottom: 50,
+    paddingBottom: 130,
   },
 
   // --------------------------------
@@ -1919,5 +1957,43 @@ const styles = StyleSheet.create({
     color: '#111111',
     fontSize: 27,
     marginRight: 5,
+  },
+
+  // --------------------------------
+  // FLOATING VMA AI
+  // --------------------------------
+
+  aiFloatingButton: {
+    position: 'absolute',
+    right: 18,
+    bottom: 85,
+    height: 58,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+
+  aiFloatingIcon: {
+    color: '#000000',
+    fontSize: 22,
+    fontWeight: '900',
+    marginRight: 10,
+  },
+
+  aiFloatingTitle: {
+    color: '#000000',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+
+  aiFloatingSubtitle: {
+    color: '#777777',
+    fontSize: 9,
+    marginTop: 2,
   },
 });
