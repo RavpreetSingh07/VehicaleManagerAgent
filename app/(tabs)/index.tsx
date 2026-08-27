@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +18,32 @@ export default function HomeScreen() {
   const [fuelEntries, setFuelEntries] = useState<any[]>([]);
   const [serviceEntries, setServiceEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // --------------------------------
+  // TIME BASED GREETING
+  // --------------------------------
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+
+    if (hour >= 5 && hour < 12) {
+      return 'Good morning 👋';
+    }
+
+    if (hour >= 12 && hour < 17) {
+      return 'Good afternoon 👋';
+    }
+
+    if (hour >= 17 && hour < 21) {
+      return 'Good evening 👋';
+    }
+
+    return 'Good night 🌙';
+  };
+
+  // --------------------------------
+  // LOAD DASHBOARD
+  // --------------------------------
 
   const loadDashboard = async () => {
     setLoading(true);
@@ -33,14 +60,18 @@ export default function HomeScreen() {
 
       // VEHICLE
 
-      const { data: vehicleData, error: vehicleError } =
-        await supabase
-          .from('vehicles')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      const {
+        data: vehicleData,
+        error: vehicleError,
+      } = await supabase
+        .from('vehicles')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', {
+          ascending: false,
+        })
+        .limit(1)
+        .maybeSingle();
 
       if (vehicleError) {
         console.log(
@@ -53,16 +84,18 @@ export default function HomeScreen() {
 
       // FUEL
 
-      const { data: fuelData, error: fuelError } =
-        await supabase
-          .from('fuel_entries')
-          .select(
-            'id, fuel_litres, fuel_cost, distance_km, mileage, created_at'
-          )
-          .eq('user_id', user.id)
-          .order('created_at', {
-            ascending: false,
-          });
+      const {
+        data: fuelData,
+        error: fuelError,
+      } = await supabase
+        .from('fuel_entries')
+        .select(
+          'id, fuel_litres, fuel_cost, distance_km, mileage, created_at'
+        )
+        .eq('user_id', user.id)
+        .order('created_at', {
+          ascending: false,
+        });
 
       if (fuelError) {
         console.log(
@@ -75,16 +108,18 @@ export default function HomeScreen() {
 
       // SERVICE
 
-      const { data: serviceData, error: serviceError } =
-        await supabase
-          .from('service_entries')
-          .select(
-            'id, service_date, service_km, service_type, service_cost'
-          )
-          .eq('user_id', user.id)
-          .order('service_date', {
-            ascending: false,
-          });
+      const {
+        data: serviceData,
+        error: serviceError,
+      } = await supabase
+        .from('service_entries')
+        .select(
+          'id, service_date, service_km, service_type, service_cost'
+        )
+        .eq('user_id', user.id)
+        .order('service_date', {
+          ascending: false,
+        });
 
       if (serviceError) {
         console.log(
@@ -95,7 +130,10 @@ export default function HomeScreen() {
 
       setServiceEntries(serviceData || []);
     } catch (error) {
-      console.log('Dashboard error:', error);
+      console.log(
+        'Dashboard error:',
+        error
+      );
     }
 
     setLoading(false);
@@ -107,7 +145,9 @@ export default function HomeScreen() {
     }, [])
   );
 
+  // --------------------------------
   // FUEL CALCULATIONS
+  // --------------------------------
 
   const totalFuel = fuelEntries.reduce(
     (sum, entry) =>
@@ -132,13 +172,16 @@ export default function HomeScreen() {
       ? totalDistance / totalFuel
       : 0;
 
+  // --------------------------------
   // SERVICE CALCULATIONS
+  // --------------------------------
 
-  const totalServiceCost = serviceEntries.reduce(
-    (sum, entry) =>
-      sum + Number(entry.service_cost || 0),
-    0
-  );
+  const totalServiceCost =
+    serviceEntries.reduce(
+      (sum, entry) =>
+        sum + Number(entry.service_cost || 0),
+      0
+    );
 
   const totalExpense =
     totalFuelCost + totalServiceCost;
@@ -163,10 +206,15 @@ export default function HomeScreen() {
 
   const remainingServiceKm =
     nextServiceKm > 0
-      ? Math.max(nextServiceKm - currentKm, 0)
+      ? Math.max(
+          nextServiceKm - currentKm,
+          0
+        )
       : 0;
 
+  // --------------------------------
   // LOADING
+  // --------------------------------
 
   if (loading) {
     return (
@@ -183,33 +231,35 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={
+          styles.scrollContent
+        }
       >
 
         {/* HEADER */}
 
         <View style={styles.header}>
-          <View>
-            <Text style={styles.brand}>
-              VMA
-            </Text>
+          <Image
+            source={require('../../assets/images/vma-logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
 
-            <Text style={styles.connected}>
-              CONNECTED
-            </Text>
-          </View>
+          {/* STATUS DOT */}
 
-          {/* ORIGINAL WHITE DOT */}
-
-          <View style={styles.statusCircle}>
-            <View style={styles.statusDot} />
+          <View
+            style={styles.statusCircle}
+          >
+            <View
+              style={styles.statusDot}
+            />
           </View>
         </View>
 
         {/* GREETING */}
 
         <Text style={styles.greeting}>
-          Good morning 👋
+          {getGreeting()}
         </Text>
 
         <Text style={styles.welcomeText}>
@@ -223,50 +273,90 @@ export default function HomeScreen() {
           <Pressable
             style={styles.vehicleCard}
             onPress={() =>
-              router.push('/vehicle/details')
+              router.push(
+                '/vehicle/details'
+              )
             }
           >
-            <View style={styles.vehicleGlow} />
+            <View
+              style={styles.vehicleGlow}
+            />
 
-            <View style={styles.vehicleTop}>
+            <View
+              style={styles.vehicleTop}
+            >
               <View>
-                <Text style={styles.vehicleLabel}>
+                <Text
+                  style={
+                    styles.vehicleLabel
+                  }
+                >
                   YOUR VEHICLE
                 </Text>
 
-                <Text style={styles.vehicleName}>
+                <Text
+                  style={
+                    styles.vehicleName
+                  }
+                >
                   {vehicle.vehicle_name}
                 </Text>
 
-                <Text style={styles.registration}>
-                  {vehicle.registration_number}
+                <Text
+                  style={
+                    styles.registration
+                  }
+                >
+                  {
+                    vehicle.registration_number
+                  }
                 </Text>
               </View>
 
-              <View style={styles.arrowCircle}>
-                <Text style={styles.arrow}>
+              <View
+                style={styles.arrowCircle}
+              >
+                <Text
+                  style={styles.arrow}
+                >
                   ›
                 </Text>
               </View>
             </View>
 
-            <View style={styles.vehicleBottom}>
+            <View
+              style={
+                styles.vehicleBottom
+              }
+            >
               <View>
-                <Text style={styles.kmValue}>
+                <Text
+                  style={styles.kmValue}
+                >
                   {currentKm
                     ? currentKm.toLocaleString()
                     : '--'}
                 </Text>
 
-                <Text style={styles.kmLabel}>
+                <Text
+                  style={styles.kmLabel}
+                >
                   CURRENT KM
                 </Text>
               </View>
 
-              <View style={styles.vehicleStatus}>
-                <View style={styles.activeDot} />
+              <View
+                style={
+                  styles.vehicleStatus
+                }
+              >
+                <View
+                  style={styles.activeDot}
+                />
 
-                <Text style={styles.statusText}>
+                <Text
+                  style={styles.statusText}
+                >
                   Active
                 </Text>
               </View>
@@ -276,18 +366,26 @@ export default function HomeScreen() {
           <Pressable
             style={styles.emptyCard}
             onPress={() =>
-              router.push('/vehicle/add')
+              router.push(
+                '/vehicle/add'
+              )
             }
           >
-            <Text style={styles.emptyIcon}>
+            <Text
+              style={styles.emptyIcon}
+            >
               ＋
             </Text>
 
-            <Text style={styles.emptyTitle}>
+            <Text
+              style={styles.emptyTitle}
+            >
               Add your vehicle
             </Text>
 
-            <Text style={styles.emptyText}>
+            <Text
+              style={styles.emptyText}
+            >
               Start managing your vehicle
               with VMA.
             </Text>
@@ -298,12 +396,18 @@ export default function HomeScreen() {
           <>
             {/* VEHICLE OVERVIEW */}
 
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>
+            <View
+              style={styles.sectionHeader}
+            >
+              <Text
+                style={styles.sectionTitle}
+              >
                 Vehicle Overview
               </Text>
 
-              <Text style={styles.sectionSmall}>
+              <Text
+                style={styles.sectionSmall}
+              >
                 LIVE
               </Text>
             </View>
@@ -320,23 +424,33 @@ export default function HomeScreen() {
                   )
                 }
               >
-                <View style={styles.iconBox}>
-                  <Text style={styles.icon}>
+                <View
+                  style={styles.iconBox}
+                >
+                  <Text
+                    style={styles.icon}
+                  >
                     🔧
                   </Text>
                 </View>
 
-                <Text style={styles.infoTitle}>
+                <Text
+                  style={styles.infoTitle}
+                >
                   Service
                 </Text>
 
-                <Text style={styles.infoValue}>
+                <Text
+                  style={styles.infoValue}
+                >
                   {nextServiceKm > 0
                     ? `${remainingServiceKm.toLocaleString()} km`
                     : 'Not set'}
                 </Text>
 
-                <Text style={styles.infoSub}>
+                <Text
+                  style={styles.infoSub}
+                >
                   {nextServiceKm > 0
                     ? 'until next service'
                     : 'Add service record'}
@@ -348,26 +462,38 @@ export default function HomeScreen() {
               <Pressable
                 style={styles.infoCard}
                 onPress={() =>
-                  router.push('/explore')
+                  router.push(
+                    '/explore'
+                  )
                 }
               >
-                <View style={styles.iconBox}>
-                  <Text style={styles.icon}>
+                <View
+                  style={styles.iconBox}
+                >
+                  <Text
+                    style={styles.icon}
+                  >
                     ⛽
                   </Text>
                 </View>
 
-                <Text style={styles.infoTitle}>
+                <Text
+                  style={styles.infoTitle}
+                >
                   Fuel
                 </Text>
 
-                <Text style={styles.infoValue}>
+                <Text
+                  style={styles.infoValue}
+                >
                   {averageMileage > 0
                     ? `${averageMileage.toFixed(2)} km/L`
                     : 'No data'}
                 </Text>
 
-                <Text style={styles.infoSub}>
+                <Text
+                  style={styles.infoSub}
+                >
                   Average mileage
                 </Text>
               </Pressable>
@@ -382,21 +508,31 @@ export default function HomeScreen() {
                   )
                 }
               >
-                <View style={styles.iconBox}>
-                  <Text style={styles.icon}>
+                <View
+                  style={styles.iconBox}
+                >
+                  <Text
+                    style={styles.icon}
+                  >
                     📄
                   </Text>
                 </View>
 
-                <Text style={styles.infoTitle}>
+                <Text
+                  style={styles.infoTitle}
+                >
                   Documents
                 </Text>
 
-                <Text style={styles.infoValue}>
+                <Text
+                  style={styles.infoValue}
+                >
                   Manage
                 </Text>
 
-                <Text style={styles.infoSub}>
+                <Text
+                  style={styles.infoSub}
+                >
                   RC • PUC • Insurance
                 </Text>
               </Pressable>
@@ -406,20 +542,30 @@ export default function HomeScreen() {
               <Pressable
                 style={styles.infoCard}
                 onPress={() =>
-                  router.push('/explore')
+                  router.push(
+                    '/explore'
+                  )
                 }
               >
-                <View style={styles.iconBox}>
-                  <Text style={styles.icon}>
+                <View
+                  style={styles.iconBox}
+                >
+                  <Text
+                    style={styles.icon}
+                  >
                     ₹
                   </Text>
                 </View>
 
-                <Text style={styles.infoTitle}>
+                <Text
+                  style={styles.infoTitle}
+                >
                   Expenses
                 </Text>
 
-                <Text style={styles.infoValue}>
+                <Text
+                  style={styles.infoValue}
+                >
                   {totalExpense > 0
                     ? `₹${totalExpense.toLocaleString(
                         'en-IN'
@@ -427,7 +573,9 @@ export default function HomeScreen() {
                     : '₹0'}
                 </Text>
 
-                <Text style={styles.infoSub}>
+                <Text
+                  style={styles.infoSub}
+                >
                   Fuel + Service
                 </Text>
               </Pressable>
@@ -436,48 +584,100 @@ export default function HomeScreen() {
 
             {/* SMART TRACKING */}
 
-            <View style={styles.calculationCard}>
-              <Text style={styles.calculationLabel}>
+            <View
+              style={
+                styles.calculationCard
+              }
+            >
+              <Text
+                style={
+                  styles.calculationLabel
+                }
+              >
                 VMA SMART TRACKING
               </Text>
 
-              <Text style={styles.calculationTitle}>
+              <Text
+                style={
+                  styles.calculationTitle
+                }
+              >
                 Your vehicle data,
                 {'\n'}turned into insights.
               </Text>
 
-              <View style={styles.calculationRow}>
+              <View
+                style={
+                  styles.calculationRow
+                }
+              >
 
-                <View style={styles.statBlock}>
-                  <Text style={styles.calculationNumber}>
+                <View
+                  style={styles.statBlock}
+                >
+                  <Text
+                    style={
+                      styles.calculationNumber
+                    }
+                  >
                     {currentKm
                       ? currentKm.toLocaleString()
                       : '--'}
                   </Text>
 
-                  <Text style={styles.calculationUnit}>
+                  <Text
+                    style={
+                      styles.calculationUnit
+                    }
+                  >
                     KM TRACKED
                   </Text>
                 </View>
 
-                <View style={styles.calculationDivider} />
+                <View
+                  style={
+                    styles.calculationDivider
+                  }
+                />
 
-                <View style={styles.statBlock}>
-                  <Text style={styles.calculationNumber}>
+                <View
+                  style={styles.statBlock}
+                >
+                  <Text
+                    style={
+                      styles.calculationNumber
+                    }
+                  >
                     {averageMileage > 0
-                      ? averageMileage.toFixed(1)
+                      ? averageMileage.toFixed(
+                          1
+                        )
                       : '--'}
                   </Text>
 
-                  <Text style={styles.calculationUnit}>
+                  <Text
+                    style={
+                      styles.calculationUnit
+                    }
+                  >
                     KM/L
                   </Text>
                 </View>
 
-                <View style={styles.calculationDivider} />
+                <View
+                  style={
+                    styles.calculationDivider
+                  }
+                />
 
-                <View style={styles.statBlock}>
-                  <Text style={styles.calculationNumber}>
+                <View
+                  style={styles.statBlock}
+                >
+                  <Text
+                    style={
+                      styles.calculationNumber
+                    }
+                  >
                     {totalExpense > 0
                       ? `₹${(
                           totalExpense / 1000
@@ -485,7 +685,11 @@ export default function HomeScreen() {
                       : '--'}
                   </Text>
 
-                  <Text style={styles.calculationUnit}>
+                  <Text
+                    style={
+                      styles.calculationUnit
+                    }
+                  >
                     EXPENSE
                   </Text>
                 </View>
@@ -495,42 +699,84 @@ export default function HomeScreen() {
 
             {/* RECENT ACTIVITY */}
 
-            <View style={styles.recentHeader}>
-              <Text style={styles.sectionTitle}>
+            <View
+              style={styles.recentHeader}
+            >
+              <Text
+                style={styles.sectionTitle}
+              >
                 Recent Activity
               </Text>
             </View>
 
             {lastService ? (
-              <View style={styles.activityCard}>
-                <View style={styles.activityIcon}>
-                  <Text style={styles.activityEmoji}>
+              <View
+                style={
+                  styles.activityCard
+                }
+              >
+                <View
+                  style={
+                    styles.activityIcon
+                  }
+                >
+                  <Text
+                    style={
+                      styles.activityEmoji
+                    }
+                  >
                     🔧
                   </Text>
                 </View>
 
-                <View style={styles.activityInfo}>
-                  <Text style={styles.activityTitle}>
-                    {lastService.service_type}
+                <View
+                  style={
+                    styles.activityInfo
+                  }
+                >
+                  <Text
+                    style={
+                      styles.activityTitle
+                    }
+                  >
+                    {
+                      lastService.service_type
+                    }
                   </Text>
 
-                  <Text style={styles.activitySub}>
+                  <Text
+                    style={
+                      styles.activitySub
+                    }
+                  >
                     {Number(
                       lastService.service_km
                     ).toLocaleString()} km
                   </Text>
                 </View>
 
-                <Text style={styles.activityCost}>
+                <Text
+                  style={
+                    styles.activityCost
+                  }
+                >
                   ₹
                   {Number(
                     lastService.service_cost
-                  ).toLocaleString('en-IN')}
+                  ).toLocaleString(
+                    'en-IN'
+                  )}
                 </Text>
               </View>
             ) : (
-              <View style={styles.noActivity}>
-                <Text style={styles.noActivityText}>
+              <View
+                style={styles.noActivity}
+              >
+                <Text
+                  style={
+                    styles.noActivityText
+                  }
+                >
                   No service activity yet.
                 </Text>
               </View>
@@ -538,33 +784,49 @@ export default function HomeScreen() {
 
             {/* QUICK ACTION */}
 
-            <Text style={styles.sectionTitle}>
+            <Text
+              style={styles.sectionTitle}
+            >
               Quick Actions
             </Text>
 
             <Pressable
               style={styles.addButton}
               onPress={() =>
-                router.push('/vehicle/add')
+                router.push(
+                  '/vehicle/add'
+                )
               }
             >
-              <View style={styles.plusCircle}>
-                <Text style={styles.plus}>
+              <View
+                style={styles.plusCircle}
+              >
+                <Text
+                  style={styles.plus}
+                >
                   +
                 </Text>
               </View>
 
-              <View style={styles.addButtonText}>
-                <Text style={styles.addTitle}>
+              <View
+                style={styles.addButtonText}
+              >
+                <Text
+                  style={styles.addTitle}
+                >
                   Add Vehicle
                 </Text>
 
-                <Text style={styles.addSub}>
+                <Text
+                  style={styles.addSub}
+                >
                   Add another vehicle to VMA
                 </Text>
               </View>
 
-              <Text style={styles.addArrow}>
+              <Text
+                style={styles.addArrow}
+              >
                 ›
               </Text>
             </Pressable>
@@ -603,19 +865,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
 
-  brand: {
-    color: '#FFFFFF',
-    fontSize: 34,
-    fontWeight: '900',
-    letterSpacing: 3,
-  },
-
-  connected: {
-    color: '#888',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 5,
-    marginTop: -3,
+  logo: {
+    width: 150,
+    height: 55,
+    marginLeft: -30,
   },
 
   statusCircle: {
@@ -635,6 +888,8 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: '#FFFFFF',
   },
+
+  /* GREETING */
 
   greeting: {
     color: '#FFFFFF',

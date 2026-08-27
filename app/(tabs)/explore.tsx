@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -79,15 +80,25 @@ export default function FuelScreen() {
           'id, previous_km, current_km, fuel_litres, fuel_cost, distance_km, mileage, cost_per_km, created_at'
         )
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', {
+          ascending: false,
+        });
 
       if (error) {
-        console.log('History error:', error.message);
+        console.log(
+          'History error:',
+          error.message
+        );
       } else {
-        setEntries((data || []) as FuelEntry[]);
+        setEntries(
+          (data || []) as FuelEntry[]
+        );
       }
     } catch (error) {
-      console.log('History error:', error);
+      console.log(
+        'History error:',
+        error
+      );
     }
 
     setLoadingHistory(false);
@@ -104,18 +115,29 @@ export default function FuelScreen() {
   const saveFuelEntry = async () => {
     setMessage('');
 
-    if (!previous || !current || !litres || !cost) {
-      setMessage('Please fill in all fields.');
+    if (
+      !previous ||
+      !current ||
+      !litres ||
+      !cost
+    ) {
+      setMessage(
+        'Please fill in all fields.'
+      );
       return;
     }
 
     if (current <= previous) {
-      setMessage('Current KM must be greater than previous KM.');
+      setMessage(
+        'Current KM must be greater than previous KM.'
+      );
       return;
     }
 
     if (litres <= 0 || cost <= 0) {
-      setMessage('Fuel and cost must be greater than 0.');
+      setMessage(
+        'Fuel and cost must be greater than 0.'
+      );
       return;
     }
 
@@ -128,22 +150,33 @@ export default function FuelScreen() {
       } = await supabase.auth.getUser();
 
       if (userError || !user) {
-        setMessage('Please log in again.');
+        setMessage(
+          'Please log in again.'
+        );
         setSaving(false);
         return;
       }
 
-      const { data: vehicle, error: vehicleError } =
-        await supabase
-          .from('vehicles')
-          .select('id')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      const {
+        data: vehicle,
+        error: vehicleError,
+      } = await supabase
+        .from('vehicles')
+        .select('id')
+        .eq('user_id', user.id)
+        .order('created_at', {
+          ascending: false,
+        })
+        .limit(1)
+        .maybeSingle();
 
-      if (vehicleError || !vehicle) {
-        setMessage('No vehicle found.');
+      if (
+        vehicleError ||
+        !vehicle
+      ) {
+        setMessage(
+          'No vehicle found.'
+        );
         setSaving(false);
         return;
       }
@@ -160,24 +193,38 @@ export default function FuelScreen() {
         });
 
       if (error) {
-        console.log('Fuel save error:', error.message);
-        setMessage(`Save failed: ${error.message}`);
+        console.log(
+          'Fuel save error:',
+          error.message
+        );
+
+        setMessage(
+          `Save failed: ${error.message}`
+        );
+
         setSaving(false);
         return;
       }
 
-      setMessage('✓ Fuel entry saved');
+      setMessage(
+        '✓ Fuel entry saved'
+      );
 
       setPreviousKm('');
       setCurrentKm('');
       setFuelLitres('');
       setFuelCost('');
 
-      // Reload history and statistics
       await loadFuelHistory();
     } catch (error) {
-      console.log('Save error:', error);
-      setMessage('Something went wrong.');
+      console.log(
+        'Save error:',
+        error
+      );
+
+      setMessage(
+        'Something went wrong.'
+      );
     }
 
     setSaving(false);
@@ -188,19 +235,32 @@ export default function FuelScreen() {
   // --------------------------------
 
   const totalFuel = entries.reduce(
-    (sum, entry) => sum + Number(entry.fuel_litres),
+    (sum, entry) =>
+      sum +
+      Number(
+        entry.fuel_litres
+      ),
     0
   );
 
   const totalCost = entries.reduce(
-    (sum, entry) => sum + Number(entry.fuel_cost),
+    (sum, entry) =>
+      sum +
+      Number(
+        entry.fuel_cost
+      ),
     0
   );
 
-  const totalDistance = entries.reduce(
-    (sum, entry) => sum + Number(entry.distance_km),
-    0
-  );
+  const totalDistance =
+    entries.reduce(
+      (sum, entry) =>
+        sum +
+        Number(
+          entry.distance_km
+        ),
+      0
+    );
 
   const averageMileage =
     totalFuel > 0
@@ -215,72 +275,112 @@ export default function FuelScreen() {
   const bestMileage =
     entries.length > 0
       ? Math.max(
-          ...entries.map((entry) => Number(entry.mileage))
+          ...entries.map(
+            (entry) =>
+              Number(
+                entry.mileage
+              )
+          )
         )
       : 0;
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={
+        Platform.OS === 'ios'
+          ? 'padding'
+          : undefined
+      }
     >
       <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={
+          false
+        }
+        contentContainerStyle={
+          styles.content
+        }
         keyboardShouldPersistTaps="handled"
       >
 
         {/* HEADER */}
 
         <View style={styles.header}>
-          <View>
-            <Text style={styles.brand}>VMA</Text>
+          <Image
+            source={require('../../assets/images/vma-logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
 
-            <Text style={styles.connected}>
-              CONNECTED
+          <View
+            style={styles.fuelIcon}
+          >
+            <Text
+              style={
+                styles.fuelIconText
+              }
+            >
+              ⛽
             </Text>
           </View>
-
-          <View style={styles.fuelIcon}>
-            <Text style={styles.fuelIconText}>⛽</Text>
-          </View>
         </View>
+
+        {/* TITLE */}
 
         <Text style={styles.title}>
           Fuel & Mileage
         </Text>
 
         <Text style={styles.subtitle}>
-          Track your fuel usage and discover
-          how efficiently your vehicle is running.
+          Track your fuel usage and
+          discover how efficiently your
+          vehicle is running.
         </Text>
 
         {/* CURRENT CALCULATION */}
 
-        <View style={styles.resultCard}>
-          <Text style={styles.resultLabel}>
+        <View
+          style={styles.resultCard}
+        >
+          <Text
+            style={styles.resultLabel}
+          >
             CURRENT MILEAGE
           </Text>
 
-          <Text style={styles.mileage}>
+          <Text
+            style={styles.mileage}
+          >
             {mileage > 0
               ? mileage.toFixed(2)
               : '--'}
           </Text>
 
-          <Text style={styles.mileageUnit}>
+          <Text
+            style={styles.mileageUnit}
+          >
             KM / L
           </Text>
 
-          <View style={styles.resultDivider} />
+          <View
+            style={
+              styles.resultDivider
+            }
+          />
 
-          <View style={styles.resultRow}>
+          <View
+            style={styles.resultRow}
+          >
             <View>
-              <Text style={styles.smallLabel}>
+              <Text
+                style={styles.smallLabel}
+              >
                 DISTANCE
               </Text>
 
-              <Text style={styles.smallValue}>
+              <Text
+                style={styles.smallValue}
+              >
                 {distance > 0
                   ? `${distance.toLocaleString()} km`
                   : '--'}
@@ -288,11 +388,15 @@ export default function FuelScreen() {
             </View>
 
             <View>
-              <Text style={styles.smallLabel}>
+              <Text
+                style={styles.smallLabel}
+              >
                 COST / KM
               </Text>
 
-              <Text style={styles.smallValue}>
+              <Text
+                style={styles.smallValue}
+              >
                 {costPerKm > 0
                   ? `₹${costPerKm.toFixed(2)}`
                   : '--'}
@@ -303,72 +407,118 @@ export default function FuelScreen() {
 
         {/* STATISTICS */}
 
-        <Text style={styles.sectionTitle}>
+        <Text
+          style={styles.sectionTitle}
+        >
           Fuel Statistics
         </Text>
 
-        <View style={styles.statsGrid}>
+        <View
+          style={styles.statsGrid}
+        >
 
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>
+          <View
+            style={styles.statCard}
+          >
+            <Text
+              style={styles.statLabel}
+            >
               AVERAGE
             </Text>
 
-            <Text style={styles.statValue}>
+            <Text
+              style={styles.statValue}
+            >
               {averageMileage > 0
-                ? averageMileage.toFixed(2)
+                ? averageMileage.toFixed(
+                    2
+                  )
                 : '--'}
             </Text>
 
-            <Text style={styles.statUnit}>
+            <Text
+              style={styles.statUnit}
+            >
               KM / L
             </Text>
           </View>
 
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>
+          <View
+            style={styles.statCard}
+          >
+            <Text
+              style={styles.statLabel}
+            >
               TOTAL FUEL
             </Text>
 
-            <Text style={styles.statValue}>
+            <Text
+              style={styles.statValue}
+            >
               {totalFuel > 0
                 ? totalFuel.toFixed(1)
                 : '--'}
             </Text>
 
-            <Text style={styles.statUnit}>
+            <Text
+              style={styles.statUnit}
+            >
               LITRES
             </Text>
           </View>
 
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>
+          <View
+            style={styles.statCard}
+          >
+            <Text
+              style={styles.statLabel}
+            >
               TOTAL SPENT
             </Text>
 
-            <Text style={styles.statValueSmall}>
+            <Text
+              style={
+                styles.statValueSmall
+              }
+            >
               {totalCost > 0
-                ? `₹${totalCost.toFixed(0)}`
+                ? `₹${totalCost.toFixed(
+                    0
+                  )}`
                 : '--'}
             </Text>
 
-            <Text style={styles.statUnit}>
+            <Text
+              style={styles.statUnit}
+            >
               FUEL COST
             </Text>
           </View>
 
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>
+          <View
+            style={styles.statCard}
+          >
+            <Text
+              style={styles.statLabel}
+            >
               COST / KM
             </Text>
 
-            <Text style={styles.statValueSmall}>
+            <Text
+              style={
+                styles.statValueSmall
+              }
+            >
               {averageCostPerKm > 0
-                ? `₹${averageCostPerKm.toFixed(2)}`
+                ? `₹${averageCostPerKm.toFixed(
+                    2
+                  )}`
                 : '--'}
             </Text>
 
-            <Text style={styles.statUnit}>
+            <Text
+              style={styles.statUnit}
+            >
               AVERAGE
             </Text>
           </View>
@@ -377,20 +527,30 @@ export default function FuelScreen() {
 
         {/* NEW ENTRY */}
 
-        <Text style={styles.sectionTitle}>
+        <Text
+          style={styles.sectionTitle}
+        >
           New Fuel Entry
         </Text>
 
-        <View style={styles.formCard}>
+        <View
+          style={styles.formCard}
+        >
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
+          <View
+            style={styles.inputGroup}
+          >
+            <Text
+              style={styles.inputLabel}
+            >
               PREVIOUS KM
             </Text>
 
             <TextInput
               value={previousKm}
-              onChangeText={setPreviousKm}
+              onChangeText={
+                setPreviousKm
+              }
               placeholder="e.g. 10000"
               placeholderTextColor="#555"
               keyboardType="numeric"
@@ -398,14 +558,20 @@ export default function FuelScreen() {
             />
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
+          <View
+            style={styles.inputGroup}
+          >
+            <Text
+              style={styles.inputLabel}
+            >
               CURRENT KM
             </Text>
 
             <TextInput
               value={currentKm}
-              onChangeText={setCurrentKm}
+              onChangeText={
+                setCurrentKm
+              }
               placeholder="e.g. 10500"
               placeholderTextColor="#555"
               keyboardType="numeric"
@@ -413,44 +579,72 @@ export default function FuelScreen() {
             />
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
+          <View
+            style={styles.inputGroup}
+          >
+            <Text
+              style={styles.inputLabel}
+            >
               FUEL FILLED
             </Text>
 
-            <View style={styles.inputWithUnit}>
+            <View
+              style={
+                styles.inputWithUnit
+              }
+            >
               <TextInput
                 value={fuelLitres}
-                onChangeText={setFuelLitres}
+                onChangeText={
+                  setFuelLitres
+                }
                 placeholder="e.g. 40"
                 placeholderTextColor="#555"
                 keyboardType="decimal-pad"
-                style={styles.inputUnit}
+                style={
+                  styles.inputUnit
+                }
               />
 
-              <Text style={styles.unit}>
+              <Text
+                style={styles.unit}
+              >
                 L
               </Text>
             </View>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
+          <View
+            style={styles.inputGroup}
+          >
+            <Text
+              style={styles.inputLabel}
+            >
               FUEL COST
             </Text>
 
-            <View style={styles.inputWithUnit}>
-              <Text style={styles.rupee}>
+            <View
+              style={
+                styles.inputWithUnit
+              }
+            >
+              <Text
+                style={styles.rupee}
+              >
                 ₹
               </Text>
 
               <TextInput
                 value={fuelCost}
-                onChangeText={setFuelCost}
+                onChangeText={
+                  setFuelCost
+                }
                 placeholder="e.g. 4000"
                 placeholderTextColor="#555"
                 keyboardType="decimal-pad"
-                style={styles.inputUnit}
+                style={
+                  styles.inputUnit
+                }
               />
             </View>
           </View>
@@ -458,20 +652,31 @@ export default function FuelScreen() {
           <Pressable
             style={[
               styles.saveButton,
-              saving && styles.buttonDisabled,
+              saving &&
+                styles.buttonDisabled,
             ]}
-            onPress={saveFuelEntry}
+            onPress={
+              saveFuelEntry
+            }
             disabled={saving}
           >
             {saving ? (
-              <ActivityIndicator color="#000" />
+              <ActivityIndicator
+                color="#000"
+              />
             ) : (
               <>
-                <Text style={styles.saveText}>
+                <Text
+                  style={
+                    styles.saveText
+                  }
+                >
                   Save Fuel Entry
                 </Text>
 
-                <Text style={styles.arrow}>
+                <Text
+                  style={styles.arrow}
+                >
                   →
                 </Text>
               </>
@@ -479,7 +684,9 @@ export default function FuelScreen() {
           </Pressable>
 
           {message !== '' && (
-            <Text style={styles.message}>
+            <Text
+              style={styles.message}
+            >
               {message}
             </Text>
           )}
@@ -488,110 +695,220 @@ export default function FuelScreen() {
 
         {/* FUEL HISTORY */}
 
-        <View style={styles.historyHeader}>
-          <Text style={styles.sectionTitle}>
+        <View
+          style={
+            styles.historyHeader
+          }
+        >
+          <Text
+            style={styles.sectionTitle}
+          >
             Fuel History
           </Text>
 
           {entries.length > 0 && (
-            <Text style={styles.entryCount}>
-              {entries.length} {entries.length === 1 ? 'ENTRY' : 'ENTRIES'}
+            <Text
+              style={styles.entryCount}
+            >
+              {entries.length}{' '}
+              {entries.length === 1
+                ? 'ENTRY'
+                : 'ENTRIES'}
             </Text>
           )}
         </View>
 
         {loadingHistory ? (
-          <View style={styles.loadingHistory}>
-            <ActivityIndicator color="#FFFFFF" />
+          <View
+            style={
+              styles.loadingHistory
+            }
+          >
+            <ActivityIndicator
+              color="#FFFFFF"
+            />
           </View>
         ) : entries.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>
+          <View
+            style={styles.emptyCard}
+          >
+            <Text
+              style={styles.emptyTitle}
+            >
               No fuel history yet
             </Text>
 
-            <Text style={styles.emptyText}>
-              Your saved fuel entries will appear here.
+            <Text
+              style={styles.emptyText}
+            >
+              Your saved fuel entries
+              will appear here.
             </Text>
           </View>
         ) : (
-          entries.map((entry) => (
-            <View
-              key={entry.id}
-              style={styles.historyCard}
-            >
-              <View style={styles.historyTop}>
-                <View>
-                  <Text style={styles.historyKm}>
-                    {Number(entry.current_km).toLocaleString()} km
-                  </Text>
+          entries.map(
+            (entry) => (
+              <View
+                key={entry.id}
+                style={
+                  styles.historyCard
+                }
+              >
+                <View
+                  style={
+                    styles.historyTop
+                  }
+                >
+                  <View>
+                    <Text
+                      style={
+                        styles.historyKm
+                      }
+                    >
+                      {Number(
+                        entry.current_km
+                      ).toLocaleString()}{' '}
+                      km
+                    </Text>
 
-                  <Text style={styles.historyDate}>
-                    {new Date(entry.created_at).toLocaleDateString()}
+                    <Text
+                      style={
+                        styles.historyDate
+                      }
+                    >
+                      {new Date(
+                        entry.created_at
+                      ).toLocaleDateString()}
+                    </Text>
+                  </View>
+
+                  <Text
+                    style={
+                      styles.historyCost
+                    }
+                  >
+                    ₹
+                    {Number(
+                      entry.fuel_cost
+                    ).toFixed(0)}
                   </Text>
                 </View>
 
-                <Text style={styles.historyCost}>
-                  ₹{Number(entry.fuel_cost).toFixed(0)}
+                <View
+                  style={
+                    styles.historyDivider
+                  }
+                />
+
+                <View
+                  style={
+                    styles.historyStats
+                  }
+                >
+
+                  <View>
+                    <Text
+                      style={
+                        styles.historyLabel
+                      }
+                    >
+                      FUEL
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.historyValue
+                      }
+                    >
+                      {Number(
+                        entry.fuel_litres
+                      ).toFixed(1)}{' '}
+                      L
+                    </Text>
+                  </View>
+
+                  <View>
+                    <Text
+                      style={
+                        styles.historyLabel
+                      }
+                    >
+                      DISTANCE
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.historyValue
+                      }
+                    >
+                      {Number(
+                        entry.distance_km
+                      ).toLocaleString()}{' '}
+                      km
+                    </Text>
+                  </View>
+
+                  <View>
+                    <Text
+                      style={
+                        styles.historyLabel
+                      }
+                    >
+                      MILEAGE
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.historyValue
+                      }
+                    >
+                      {Number(
+                        entry.mileage
+                      ).toFixed(2)}{' '}
+                      km/L
+                    </Text>
+                  </View>
+
+                </View>
+
+                <Text
+                  style={
+                    styles.historyCostKm
+                  }
+                >
+                  ₹
+                  {Number(
+                    entry.cost_per_km
+                  ).toFixed(2)}{' '}
+                  / km
                 </Text>
               </View>
-
-              <View style={styles.historyDivider} />
-
-              <View style={styles.historyStats}>
-
-                <View>
-                  <Text style={styles.historyLabel}>
-                    FUEL
-                  </Text>
-
-                  <Text style={styles.historyValue}>
-                    {Number(entry.fuel_litres).toFixed(1)} L
-                  </Text>
-                </View>
-
-                <View>
-                  <Text style={styles.historyLabel}>
-                    DISTANCE
-                  </Text>
-
-                  <Text style={styles.historyValue}>
-                    {Number(entry.distance_km).toLocaleString()} km
-                  </Text>
-                </View>
-
-                <View>
-                  <Text style={styles.historyLabel}>
-                    MILEAGE
-                  </Text>
-
-                  <Text style={styles.historyValue}>
-                    {Number(entry.mileage).toFixed(2)} km/L
-                  </Text>
-                </View>
-
-              </View>
-
-              <Text style={styles.historyCostKm}>
-                ₹{Number(entry.cost_per_km).toFixed(2)} / km
-              </Text>
-            </View>
-          ))
+            )
+          )
         )}
 
         {/* CALCULATION INFO */}
 
-        <View style={styles.exampleCard}>
-          <Text style={styles.exampleLabel}>
+        <View
+          style={styles.exampleCard}
+        >
+          <Text
+            style={styles.exampleLabel}
+          >
             HOW VMA CALCULATES
           </Text>
 
-          <Text style={styles.exampleTitle}>
+          <Text
+            style={styles.exampleTitle}
+          >
             Distance ÷ Fuel = Mileage
           </Text>
 
-          <Text style={styles.exampleText}>
-            Example: 500 km ÷ 40 L = 12.50 km/L
+          <Text
+            style={styles.exampleText}
+          >
+            Example: 500 km ÷ 40 L =
+            12.50 km/L
           </Text>
         </View>
 
@@ -618,19 +935,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  brand: {
-    color: '#FFFFFF',
-    fontSize: 32,
-    fontWeight: '900',
-    letterSpacing: 3,
-  },
-
-  connected: {
-    color: '#777777',
-    fontSize: 8,
-    fontWeight: '700',
-    letterSpacing: 4,
-    marginTop: -2,
+  logo: {
+    width: 150,
+    height: 55,
+    marginLeft: -30,
   },
 
   fuelIcon: {

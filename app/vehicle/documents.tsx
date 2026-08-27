@@ -1,17 +1,19 @@
+import * as DocumentPicker from 'expo-document-picker';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
-import { router } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 
 type DocumentEntry = {
@@ -20,6 +22,7 @@ type DocumentEntry = {
   document_number: string | null;
   issue_date: string | null;
   expiry_date: string | null;
+  document_url: string | null;
   created_at: string;
 };
 
@@ -37,6 +40,9 @@ export default function DocumentsScreen() {
   const [documentNumber, setDocumentNumber] = useState('');
   const [issueDate, setIssueDate] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
+
+  const [selectedFile, setSelectedFile] =
+    useState<DocumentPicker.DocumentPickerAsset | null>(null);
 
   // --------------------------------
   // LOAD DOCUMENTS
@@ -58,7 +64,7 @@ export default function DocumentsScreen() {
       const { data, error } = await supabase
         .from('vehicle_documents')
         .select(
-          'id, document_type, document_number, issue_date, expiry_date, created_at'
+          'id, document_type, document_number, issue_date, expiry_date, document_url, created_at'
         )
         .eq('user_id', user.id)
         .order('expiry_date', {
@@ -76,7 +82,10 @@ export default function DocumentsScreen() {
         );
       }
     } catch (error) {
-      console.log('Documents error:', error);
+      console.log(
+        'Documents error:',
+        error
+      );
     }
 
     setLoading(false);
@@ -85,6 +94,47 @@ export default function DocumentsScreen() {
   useEffect(() => {
     loadDocuments();
   }, []);
+
+  // --------------------------------
+  // PICK DOCUMENT
+  // --------------------------------
+
+  const pickDocument = async () => {
+    setMessage('');
+
+    try {
+      const result =
+        await DocumentPicker.getDocumentAsync({
+          type: [
+            'image/*',
+            'application/pdf',
+          ],
+          copyToCacheDirectory: true,
+          multiple: false,
+        });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const file = result.assets[0];
+
+      setSelectedFile(file);
+
+      setMessage(
+        `Selected: ${file.name}`
+      );
+    } catch (error) {
+      console.log(
+        'Document picker error:',
+        error
+      );
+
+      setMessage(
+        'Could not select the document.'
+      );
+    }
+  };
 
   // --------------------------------
   // DOCUMENT STATUS
@@ -110,7 +160,8 @@ export default function DocumentsScreen() {
       expiry.getTime() - today.getTime();
 
     const daysLeft = Math.ceil(
-      difference / (1000 * 60 * 60 * 24)
+      difference /
+        (1000 * 60 * 60 * 24)
     );
 
     if (daysLeft < 0) {
@@ -147,6 +198,13 @@ export default function DocumentsScreen() {
       return;
     }
 
+    if (!selectedFile) {
+      setMessage(
+        'Please select an image or PDF.'
+      );
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -155,10 +213,16 @@ export default function DocumentsScreen() {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        setMessage('Please log in again.');
+        setMessage(
+          'Please log in again.'
+        );
         setSaving(false);
         return;
       }
+
+      // --------------------------------
+      // GET VEHICLE
+      // --------------------------------
 
       const {
         data: vehicle,
@@ -173,13 +237,109 @@ export default function DocumentsScreen() {
         .limit(1)
         .maybeSingle();
 
+      if (vehicleError) {
+        console.log(
+          'Vehicle error:',
+          vehicleError.message
+        );
+      }
+
       if (vehicleError || !vehicle) {
-        setMessage('No vehicle found.');
+        setMessage(
+          'No vehicle found.'
+        );
         setSaving(false);
         return;
       }
 
-      const { error } = await supabase
+      // --------------------------------
+      // READ FILE
+      // --------------------------------
+
+      const response = await fetch(
+        selectedFile.uri
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          'Could not read selected file.'
+        );
+      }
+
+      const arrayBuffer =
+        await response.arrayBuffer();
+
+      // --------------------------------
+      // FILE NAME
+      // --------------------------------
+
+      const safeDocumentType =
+        documentType
+          .replace(
+            /[^a-zA-Z0-9]/g,
+            '-'
+          )
+          .toLowerCase();
+
+      const safeFileName =
+        selectedFile.name.replace(
+          /[^a-zA-Z0-9._-]/g,
+          '-'
+        );
+
+      const filePath =
+        `${user.id}/${vehicle.id}/${Date.now()}_${safeDocumentType}_${safeFileName}`;
+
+      console.log(
+        'Uploading:',
+        filePath
+      );
+
+      // --------------------------------
+      // UPLOAD FILE
+      // --------------------------------
+
+      const {
+        error: uploadError,
+      } = await supabase.storage
+        .from('vehicle-documents')
+        .upload(
+          filePath,
+          arrayBuffer,
+          {
+            contentType:
+              selectedFile.mimeType ||
+              'application/octet-stream',
+            upsert: false,
+          }
+        );
+
+      if (uploadError) {
+        console.log(
+          'File upload error:',
+          uploadError.message
+        );
+
+        setMessage(
+          `Upload failed: ${uploadError.message}`
+        );
+
+        setSaving(false);
+        return;
+      }
+
+      console.log(
+        'Upload successful:',
+        filePath
+      );
+
+      // --------------------------------
+      // SAVE DATABASE RECORD
+      // --------------------------------
+
+      const {
+        error: databaseError,
+      } = await supabase
         .from('vehicle_documents')
         .insert({
           vehicle_id: vehicle.id,
@@ -187,30 +347,44 @@ export default function DocumentsScreen() {
           document_type: documentType,
           document_number:
             documentNumber || null,
-          issue_date: issueDate || null,
+          issue_date:
+            issueDate || null,
           expiry_date: expiryDate,
+          document_url: filePath,
         });
 
-      if (error) {
+      if (databaseError) {
         console.log(
-          'Document save error:',
-          error.message
+          'Database error:',
+          databaseError.message
         );
 
+        // Remove uploaded file if DB save fails
+        await supabase.storage
+          .from('vehicle-documents')
+          .remove([filePath]);
+
         setMessage(
-          `Save failed: ${error.message}`
+          `Save failed: ${databaseError.message}`
         );
 
         setSaving(false);
         return;
       }
 
-      setMessage('✓ Document saved');
+      // --------------------------------
+      // SUCCESS
+      // --------------------------------
+
+      setMessage(
+        '✓ Document uploaded and saved'
+      );
 
       setDocumentType('RC');
       setDocumentNumber('');
       setIssueDate('');
       setExpiryDate('');
+      setSelectedFile(null);
 
       setShowAdd(false);
 
@@ -221,10 +395,163 @@ export default function DocumentsScreen() {
         error
       );
 
-      setMessage('Something went wrong.');
+      setMessage(
+        'Something went wrong while saving.'
+      );
     }
 
     setSaving(false);
+  };
+
+  // --------------------------------
+  // VIEW DOCUMENT
+  // --------------------------------
+
+  const viewDocument = (
+    filePath: string | null,
+    documentType?: string
+  ) => {
+    if (!filePath) {
+      Alert.alert(
+        'No document',
+        'No file has been uploaded for this document.'
+      );
+      return;
+    }
+
+    const fileName =
+      filePath.split('/').pop() ||
+      'Document';
+
+    router.push({
+      pathname:
+        '/vehicle/document-viewer',
+      params: {
+        path: filePath,
+        type: documentType || '',
+        name: fileName,
+      },
+    });
+  };
+
+  // --------------------------------
+  // DELETE DOCUMENT
+  // --------------------------------
+
+  const deleteDocument = (
+    document: DocumentEntry
+  ) => {
+    Alert.alert(
+      'Delete Document?',
+      `Are you sure you want to delete this ${document.document_type} document?\n\nThis will permanently remove the document and its uploaded file.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setMessage('');
+
+            try {
+              const {
+                data: { user },
+              } = await supabase.auth.getUser();
+
+              if (!user) {
+                Alert.alert(
+                  'Session expired',
+                  'Please log in again.'
+                );
+                return;
+              }
+
+              // --------------------------------
+              // DELETE STORAGE FILE
+              // --------------------------------
+
+              if (document.document_url) {
+                const {
+                  error: storageError,
+                } = await supabase.storage
+                  .from('vehicle-documents')
+                  .remove([
+                    document.document_url,
+                  ]);
+
+                if (storageError) {
+                  console.log(
+                    'Storage delete error:',
+                    storageError.message
+                  );
+
+                  Alert.alert(
+                    'Delete failed',
+                    `Could not delete the uploaded file: ${storageError.message}`
+                  );
+
+                  return;
+                }
+              }
+
+              // --------------------------------
+              // DELETE DATABASE RECORD
+              // --------------------------------
+
+              const {
+                error: databaseError,
+              } = await supabase
+                .from('vehicle_documents')
+                .delete()
+                .eq('id', document.id)
+                .eq('user_id', user.id);
+
+              if (databaseError) {
+                console.log(
+                  'Database delete error:',
+                  databaseError.message
+                );
+
+                Alert.alert(
+                  'Delete failed',
+                  databaseError.message
+                );
+
+                return;
+              }
+
+              // --------------------------------
+              // UPDATE SCREEN
+              // --------------------------------
+
+              setDocuments((current) =>
+                current.filter(
+                  (item) =>
+                    item.id !== document.id
+                )
+              );
+
+              Alert.alert(
+                'Deleted',
+                `${document.document_type} has been deleted successfully.`
+              );
+            } catch (error) {
+              console.log(
+                'Delete document error:',
+                error
+              );
+
+              Alert.alert(
+                'Delete failed',
+                'Something went wrong while deleting the document.'
+              );
+            }
+          },
+        },
+      ]
+    );
   };
 
   // --------------------------------
@@ -252,7 +579,9 @@ export default function DocumentsScreen() {
       }
     >
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={
+          styles.content
+        }
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
@@ -273,7 +602,9 @@ export default function DocumentsScreen() {
             Documents
           </Text>
 
-          <View style={styles.headerSpacer} />
+          <View
+            style={styles.headerSpacer}
+          />
         </View>
 
         {/* INTRO */}
@@ -300,7 +631,9 @@ export default function DocumentsScreen() {
             </Text>
           </View>
 
-          <View style={styles.summaryDivider} />
+          <View
+            style={styles.summaryDivider}
+          />
 
           <View>
             <Text style={styles.summaryLabel}>
@@ -309,19 +642,22 @@ export default function DocumentsScreen() {
 
             <Text style={styles.summaryValue}>
               {
-                documents.filter((doc) => {
-                  const status =
-                    getDocumentStatus(
-                      doc.expiry_date
-                    );
+                documents.filter(
+                  (doc) => {
+                    const status =
+                      getDocumentStatus(
+                        doc.expiry_date
+                      );
 
-                  return (
-                    status.text === 'EXPIRED' ||
-                    status.text.includes(
-                      'DAYS LEFT'
-                    )
-                  );
-                }).length
+                    return (
+                      status.text ===
+                        'EXPIRED' ||
+                      status.text.includes(
+                        'DAYS LEFT'
+                      )
+                    );
+                  }
+                ).length
               }
             </Text>
           </View>
@@ -336,13 +672,19 @@ export default function DocumentsScreen() {
             setShowAdd(!showAdd);
           }}
         >
-          <Text style={styles.addButtonText}>
+          <Text
+            style={
+              styles.addButtonText
+            }
+          >
             {showAdd
               ? 'Close'
               : '+ Add Document'}
           </Text>
 
-          <Text style={styles.addArrow}>
+          <Text
+            style={styles.addArrow}
+          >
             {showAdd ? '×' : '→'}
           </Text>
         </Pressable>
@@ -361,29 +703,35 @@ export default function DocumentsScreen() {
             </Text>
 
             <View style={styles.typeRow}>
-              {DOCUMENT_TYPES.map((type) => (
-                <Pressable
-                  key={type}
-                  style={[
-                    styles.typeButton,
-                    documentType === type &&
-                      styles.typeButtonActive,
-                  ]}
-                  onPress={() =>
-                    setDocumentType(type)
-                  }
-                >
-                  <Text
+              {DOCUMENT_TYPES.map(
+                (type) => (
+                  <Pressable
+                    key={type}
                     style={[
-                      styles.typeText,
-                      documentType === type &&
-                        styles.typeTextActive,
+                      styles.typeButton,
+                      documentType ===
+                        type &&
+                        styles.typeButtonActive,
                     ]}
+                    onPress={() =>
+                      setDocumentType(
+                        type
+                      )
+                    }
                   >
-                    {type}
-                  </Text>
-                </Pressable>
-              ))}
+                    <Text
+                      style={[
+                        styles.typeText,
+                        documentType ===
+                          type &&
+                          styles.typeTextActive,
+                      ]}
+                    >
+                      {type}
+                    </Text>
+                  </Pressable>
+                )
+              )}
             </View>
 
             <Text style={styles.inputLabel}>
@@ -392,7 +740,9 @@ export default function DocumentsScreen() {
 
             <TextInput
               value={documentNumber}
-              onChangeText={setDocumentNumber}
+              onChangeText={
+                setDocumentNumber
+              }
               placeholder="Optional"
               placeholderTextColor="#555"
               style={styles.input}
@@ -405,7 +755,9 @@ export default function DocumentsScreen() {
 
             <TextInput
               value={issueDate}
-              onChangeText={setIssueDate}
+              onChangeText={
+                setIssueDate
+              }
               placeholder="YYYY-MM-DD"
               placeholderTextColor="#555"
               style={styles.input}
@@ -417,11 +769,59 @@ export default function DocumentsScreen() {
 
             <TextInput
               value={expiryDate}
-              onChangeText={setExpiryDate}
+              onChangeText={
+                setExpiryDate
+              }
               placeholder="YYYY-MM-DD"
               placeholderTextColor="#555"
               style={styles.input}
             />
+
+            {/* FILE PICKER */}
+
+            <Text style={styles.inputLabel}>
+              DOCUMENT FILE
+            </Text>
+
+            <Pressable
+              style={styles.fileButton}
+              onPress={pickDocument}
+            >
+              <Text
+                style={styles.fileIcon}
+              >
+                📎
+              </Text>
+
+              <View
+                style={styles.fileInfo}
+              >
+                <Text
+                  style={styles.fileTitle}
+                >
+                  {selectedFile
+                    ? 'File selected'
+                    : 'Choose image or PDF'}
+                </Text>
+
+                <Text
+                  style={styles.fileSubtitle}
+                  numberOfLines={1}
+                >
+                  {selectedFile
+                    ? selectedFile.name
+                    : 'RC • Insurance • PUC'}
+                </Text>
+              </View>
+
+              <Text
+                style={styles.fileArrow}
+              >
+                →
+              </Text>
+            </Pressable>
+
+            {/* SAVE */}
 
             <Pressable
               style={styles.saveButton}
@@ -433,24 +833,31 @@ export default function DocumentsScreen() {
                   color="#000000"
                 />
               ) : (
-                <Text style={styles.saveText}>
-                  Save Document
+                <Text
+                  style={styles.saveText}
+                >
+                  Upload & Save
                 </Text>
               )}
             </Pressable>
 
             {message !== '' && (
-              <Text style={styles.message}>
+              <Text
+                style={styles.message}
+              >
                 {message}
               </Text>
             )}
+
           </View>
         )}
 
         {/* DOCUMENT LIST */}
 
         <View style={styles.listHeader}>
-          <Text style={styles.sectionTitle}>
+          <Text
+            style={styles.sectionTitle}
+          >
             Your Documents
           </Text>
 
@@ -462,128 +869,251 @@ export default function DocumentsScreen() {
         </View>
 
         {documents.length === 0 ? (
+
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyIcon}>
+
+            <Text
+              style={styles.emptyIcon}
+            >
               📄
             </Text>
 
-            <Text style={styles.emptyTitle}>
+            <Text
+              style={styles.emptyTitle}
+            >
               No documents yet
             </Text>
 
-            <Text style={styles.emptyText}>
+            <Text
+              style={styles.emptyText}
+            >
               Add your RC, insurance or PUC
               to start tracking expiry dates.
             </Text>
+
           </View>
+
         ) : (
-          documents.map((document) => {
-            const status =
-              getDocumentStatus(
-                document.expiry_date
-              );
 
-            return (
-              <View
-                key={document.id}
-                style={styles.documentCard}
-              >
-                {/* TOP */}
+          documents.map(
+            (document) => {
 
-                <View style={styles.documentTop}>
-                  <View style={styles.documentIcon}>
-                    <Text style={styles.documentEmoji}>
-                      {document.document_type ===
-                      'Insurance'
-                        ? '🛡️'
-                        : document.document_type ===
-                          'PUC'
-                        ? '🌱'
-                        : '📄'}
-                    </Text>
-                  </View>
+              const status =
+                getDocumentStatus(
+                  document.expiry_date
+                );
 
-                  <View
-                    style={styles.documentInfo}
-                  >
-                    <Text
-                      style={styles.documentType}
-                    >
-                      {document.document_type}
-                    </Text>
+              return (
+                <View
+                  key={document.id}
+                  style={
+                    styles.documentCard
+                  }
+                >
 
-                    <Text
-                      style={styles.documentNumber}
-                    >
-                      {document.document_number ||
-                        'Number not added'}
-                    </Text>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      status.style,
-                    ]}
-                  >
-                    <Text
-                      style={styles.statusText}
-                    >
-                      {status.text}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* DATES */}
-
-                <View style={styles.dateDivider} />
-
-                <View style={styles.dateRow}>
-
-                  <View>
-                    <Text style={styles.dateLabel}>
-                      ISSUE DATE
-                    </Text>
-
-                    <Text style={styles.dateValue}>
-                      {document.issue_date ||
-                        '-'}
-                    </Text>
-                  </View>
+                  {/* TOP */}
 
                   <View
                     style={
-                      styles.expiryContainer
+                      styles.documentTop
                     }
                   >
-                    <Text style={styles.dateLabel}>
-                      EXPIRY DATE
-                    </Text>
 
-                    <Text style={styles.dateValue}>
-                      {document.expiry_date ||
-                        '-'}
-                    </Text>
+                    <View
+                      style={
+                        styles.documentIcon
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.documentEmoji
+                        }
+                      >
+                        {document.document_type ===
+                        'Insurance'
+                          ? '🛡️'
+                          : document.document_type ===
+                            'PUC'
+                          ? '🌱'
+                          : '📄'}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={
+                        styles.documentInfo
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.documentType
+                        }
+                      >
+                        {document.document_type}
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.documentNumber
+                        }
+                      >
+                        {document.document_number ||
+                          'Number not added'}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        status.style,
+                      ]}
+                    >
+                      <Text
+                        style={
+                          styles.statusText
+                        }
+                      >
+                        {status.text}
+                      </Text>
+                    </View>
+
                   </View>
 
+                  {/* DATES */}
+
+                  <View
+                    style={
+                      styles.dateDivider
+                    }
+                  />
+
+                  <View
+                    style={styles.dateRow}
+                  >
+
+                    <View>
+                      <Text
+                        style={
+                          styles.dateLabel
+                        }
+                      >
+                        ISSUE DATE
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.dateValue
+                        }
+                      >
+                        {document.issue_date ||
+                          '-'}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={
+                        styles.expiryContainer
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.dateLabel
+                        }
+                      >
+                        EXPIRY DATE
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.dateValue
+                        }
+                      >
+                        {document.expiry_date ||
+                          '-'}
+                      </Text>
+                    </View>
+
+                  </View>
+
+                  {/* VIEW DOCUMENT */}
+
+                  {document.document_url && (
+                    <Pressable
+                      style={
+                        styles.viewButton
+                      }
+                      onPress={() =>
+                        viewDocument(
+                          document.document_url,
+                          document.document_type
+                        )
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.viewButtonText
+                        }
+                      >
+                        View Document
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.viewArrow
+                        }
+                      >
+                        →
+                      </Text>
+                    </Pressable>
+                  )}
+
+                  {/* DELETE DOCUMENT */}
+
+                  <Pressable
+                    style={
+                      styles.deleteButton
+                    }
+                    onPress={() =>
+                      deleteDocument(
+                        document
+                      )
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.deleteButtonText
+                      }
+                    >
+                      Delete Document
+                    </Text>
+                  </Pressable>
+
                 </View>
-              </View>
-            );
-          })
+              );
+            }
+          )
+
         )}
 
         {/* INFO */}
 
         <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>
+
+          <Text
+            style={styles.infoTitle}
+          >
             VMA DOCUMENT TRACKING
           </Text>
 
-          <Text style={styles.infoText}>
+          <Text
+            style={styles.infoText}
+          >
+            Your documents are stored securely.
             VMA will show you when a document
             is valid, expiring soon or already
             expired.
           </Text>
+
         </View>
 
       </ScrollView>
@@ -778,6 +1308,43 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 
+  fileButton: {
+    minHeight: 65,
+    backgroundColor: '#191919',
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#292929',
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  fileIcon: {
+    fontSize: 22,
+  },
+
+  fileInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+
+  fileTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  fileSubtitle: {
+    color: '#666666',
+    fontSize: 11,
+    marginTop: 4,
+  },
+
+  fileArrow: {
+    color: '#FFFFFF',
+    fontSize: 20,
+  },
+
   saveButton: {
     height: 55,
     backgroundColor: '#FFFFFF',
@@ -950,6 +1517,49 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginTop: 5,
+  },
+
+  viewButton: {
+    height: 46,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 13,
+    marginTop: 18,
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  viewButtonText: {
+    color: '#000000',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  viewArrow: {
+    color: '#000000',
+    fontSize: 20,
+  },
+
+  // DELETE BUTTON — RED
+
+  deleteButton: {
+    height: 46,
+    backgroundColor: '#2A0D0D',
+    borderRadius: 13,
+    marginTop: 10,
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#5A2020',
+  },
+
+  deleteButtonText: {
+    color: '#FF4D4D',
+    fontSize: 13,
+    fontWeight: '700',
   },
 
   infoCard: {
