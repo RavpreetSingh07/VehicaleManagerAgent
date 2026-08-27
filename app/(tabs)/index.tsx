@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  ImageBackground,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,11 +14,54 @@ import {
 
 import { supabase } from '../../lib/supabase';
 
+type Vehicle = {
+  id: string;
+  vehicle_model_id: string | null;
+  vehicle_name: string;
+  registration_number: string;
+  registration_date: string | null;
+  current_km: number | null;
+  last_service_date: string | null;
+  last_service_km: number | null;
+  custom_image_path: string | null;
+  created_at: string;
+};
+
+type FuelEntry = {
+  id: string;
+  vehicle_id: string | null;
+  fuel_litres: number | null;
+  fuel_cost: number | null;
+  distance_km: number | null;
+  mileage: number | null;
+  created_at: string;
+};
+
+type ServiceEntry = {
+  id: string;
+  vehicle_id: string | null;
+  service_date: string;
+  service_km: number | null;
+  service_type: string;
+  service_cost: number | null;
+};
+
 export default function HomeScreen() {
-  const [vehicle, setVehicle] = useState<any>(null);
-  const [fuelEntries, setFuelEntries] = useState<any[]>([]);
-  const [serviceEntries, setServiceEntries] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selectedVehicle, setSelectedVehicle] =
+    useState<Vehicle | null>(null);
+
+  const [fuelEntries, setFuelEntries] =
+    useState<FuelEntry[]>([]);
+
+  const [serviceEntries, setServiceEntries] =
+    useState<ServiceEntry[]>([]);
+
+  const [vehicleImage, setVehicleImage] =
+    useState<string | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
 
   // --------------------------------
   // TIME BASED GREETING
@@ -42,6 +86,170 @@ export default function HomeScreen() {
   };
 
   // --------------------------------
+  // LOAD VEHICLE IMAGE
+  // --------------------------------
+
+  const loadVehicleImage = async (
+    vehicle: Vehicle
+  ) => {
+    try {
+      // CUSTOM IMAGE FIRST
+
+      if (vehicle.custom_image_path) {
+        const {
+          data: customImage,
+        } = supabase.storage
+          .from('vehicle-models')
+          .getPublicUrl(
+            vehicle.custom_image_path
+          );
+
+        if (customImage?.publicUrl) {
+          setVehicleImage(
+            customImage.publicUrl
+          );
+          return;
+        }
+      }
+
+      // DEFAULT VEHICLE MODEL IMAGE
+
+      if (!vehicle.vehicle_model_id) {
+        setVehicleImage(null);
+        return;
+      }
+
+      const {
+        data: modelData,
+        error: modelError,
+      } = await supabase
+        .from('vehicle_models')
+        .select('image_path')
+        .eq(
+          'id',
+          vehicle.vehicle_model_id
+        )
+        .maybeSingle();
+
+      if (modelError) {
+        console.log(
+          'Vehicle image model error:',
+          modelError.message
+        );
+
+        setVehicleImage(null);
+        return;
+      }
+
+      if (modelData?.image_path) {
+        const {
+          data: imageData,
+        } = supabase.storage
+          .from('vehicle-models')
+          .getPublicUrl(
+            modelData.image_path
+          );
+
+        const publicUrl =
+          imageData?.publicUrl || null;
+
+        console.log(
+          'Vehicle image URL:',
+          publicUrl
+        );
+
+        setVehicleImage(publicUrl);
+      } else {
+        console.log(
+          'No image_path found for vehicle model'
+        );
+
+        setVehicleImage(null);
+      }
+    } catch (error) {
+      console.log(
+        'Vehicle image error:',
+        error
+      );
+
+      setVehicleImage(null);
+    }
+  };
+
+  // --------------------------------
+  // LOAD SELECTED VEHICLE DATA
+  // --------------------------------
+
+  const loadVehicleData = async (
+    vehicle: Vehicle
+  ) => {
+    setSelectedVehicle(vehicle);
+
+    // Clear old image immediately
+    setVehicleImage(null);
+
+    await loadVehicleImage(vehicle);
+
+    // FUEL FOR THIS VEHICLE ONLY
+
+    const {
+      data: fuelData,
+      error: fuelError,
+    } = await supabase
+      .from('fuel_entries')
+      .select(
+        'id, vehicle_id, fuel_litres, fuel_cost, distance_km, mileage, created_at'
+      )
+      .eq(
+        'vehicle_id',
+        vehicle.id
+      )
+      .order('created_at', {
+        ascending: false,
+      });
+
+    if (fuelError) {
+      console.log(
+        'Fuel loading error:',
+        fuelError.message
+      );
+    }
+
+    setFuelEntries(
+      (fuelData || []) as FuelEntry[]
+    );
+
+    // SERVICE FOR THIS VEHICLE ONLY
+
+    const {
+      data: serviceData,
+      error: serviceError,
+    } = await supabase
+      .from('service_entries')
+      .select(
+        'id, vehicle_id, service_date, service_km, service_type, service_cost'
+      )
+      .eq(
+        'vehicle_id',
+        vehicle.id
+      )
+      .order('service_date', {
+        ascending: false,
+      });
+
+    if (serviceError) {
+      console.log(
+        'Service loading error:',
+        serviceError.message
+      );
+    }
+
+    setServiceEntries(
+      (serviceData || []) as ServiceEntry[]
+    );
+  };
+
+  // --------------------------------
   // LOAD DASHBOARD
   // --------------------------------
 
@@ -58,7 +266,7 @@ export default function HomeScreen() {
         return;
       }
 
-      // VEHICLE
+      // LOAD ALL VEHICLES
 
       const {
         data: vehicleData,
@@ -69,9 +277,7 @@ export default function HomeScreen() {
         .eq('user_id', user.id)
         .order('created_at', {
           ascending: false,
-        })
-        .limit(1)
-        .maybeSingle();
+        });
 
       if (vehicleError) {
         console.log(
@@ -80,55 +286,30 @@ export default function HomeScreen() {
         );
       }
 
-      setVehicle(vehicleData || null);
+      const loadedVehicles =
+        (vehicleData || []) as Vehicle[];
 
-      // FUEL
+      setVehicles(loadedVehicles);
 
-      const {
-        data: fuelData,
-        error: fuelError,
-      } = await supabase
-        .from('fuel_entries')
-        .select(
-          'id, fuel_litres, fuel_cost, distance_km, mileage, created_at'
-        )
-        .eq('user_id', user.id)
-        .order('created_at', {
-          ascending: false,
-        });
+      // NO VEHICLES
 
-      if (fuelError) {
-        console.log(
-          'Fuel loading error:',
-          fuelError.message
-        );
+      if (loadedVehicles.length === 0) {
+        setSelectedVehicle(null);
+        setFuelEntries([]);
+        setServiceEntries([]);
+        setVehicleImage(null);
+        setLoading(false);
+        return;
       }
 
-      setFuelEntries(fuelData || []);
+      // SELECT NEWEST VEHICLE BY DEFAULT
 
-      // SERVICE
+      const firstVehicle =
+        loadedVehicles[0];
 
-      const {
-        data: serviceData,
-        error: serviceError,
-      } = await supabase
-        .from('service_entries')
-        .select(
-          'id, service_date, service_km, service_type, service_cost'
-        )
-        .eq('user_id', user.id)
-        .order('service_date', {
-          ascending: false,
-        });
-
-      if (serviceError) {
-        console.log(
-          'Service loading error:',
-          serviceError.message
-        );
-      }
-
-      setServiceEntries(serviceData || []);
+      await loadVehicleData(
+        firstVehicle
+      );
     } catch (error) {
       console.log(
         'Dashboard error:',
@@ -146,26 +327,54 @@ export default function HomeScreen() {
   );
 
   // --------------------------------
+  // SWITCH VEHICLE
+  // --------------------------------
+
+  const switchVehicle = async (
+    vehicle: Vehicle
+  ) => {
+    if (
+      selectedVehicle?.id === vehicle.id
+    ) {
+      return;
+    }
+
+    await loadVehicleData(vehicle);
+  };
+
+  // --------------------------------
   // FUEL CALCULATIONS
   // --------------------------------
 
-  const totalFuel = fuelEntries.reduce(
-    (sum, entry) =>
-      sum + Number(entry.fuel_litres || 0),
-    0
-  );
+  const totalFuel =
+    fuelEntries.reduce(
+      (sum, entry) =>
+        sum +
+        Number(
+          entry.fuel_litres || 0
+        ),
+      0
+    );
 
-  const totalFuelCost = fuelEntries.reduce(
-    (sum, entry) =>
-      sum + Number(entry.fuel_cost || 0),
-    0
-  );
+  const totalFuelCost =
+    fuelEntries.reduce(
+      (sum, entry) =>
+        sum +
+        Number(
+          entry.fuel_cost || 0
+        ),
+      0
+    );
 
-  const totalDistance = fuelEntries.reduce(
-    (sum, entry) =>
-      sum + Number(entry.distance_km || 0),
-    0
-  );
+  const totalDistance =
+    fuelEntries.reduce(
+      (sum, entry) =>
+        sum +
+        Number(
+          entry.distance_km || 0
+        ),
+      0
+    );
 
   const averageMileage =
     totalFuel > 0
@@ -179,12 +388,16 @@ export default function HomeScreen() {
   const totalServiceCost =
     serviceEntries.reduce(
       (sum, entry) =>
-        sum + Number(entry.service_cost || 0),
+        sum +
+        Number(
+          entry.service_cost || 0
+        ),
       0
     );
 
   const totalExpense =
-    totalFuelCost + totalServiceCost;
+    totalFuelCost +
+    totalServiceCost;
 
   const lastService =
     serviceEntries.length > 0
@@ -192,22 +405,28 @@ export default function HomeScreen() {
       : null;
 
   const currentKm =
-    Number(vehicle?.current_km) || 0;
+    Number(
+      selectedVehicle?.current_km
+    ) || 0;
 
   const lastServiceKm =
-    Number(vehicle?.last_service_km) || 0;
+    Number(
+      selectedVehicle?.last_service_km
+    ) || 0;
 
   const serviceInterval = 5000;
 
   const nextServiceKm =
     lastServiceKm > 0
-      ? lastServiceKm + serviceInterval
+      ? lastServiceKm +
+        serviceInterval
       : 0;
 
   const remainingServiceKm =
     nextServiceKm > 0
       ? Math.max(
-          nextServiceKm - currentKm,
+          nextServiceKm -
+            currentKm,
           0
         )
       : 0;
@@ -227,10 +446,16 @@ export default function HomeScreen() {
     );
   }
 
+  // --------------------------------
+  // SCREEN
+  // --------------------------------
+
   return (
     <View style={styles.container}>
       <ScrollView
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={
+          false
+        }
         contentContainerStyle={
           styles.scrollContent
         }
@@ -244,8 +469,6 @@ export default function HomeScreen() {
             style={styles.logo}
             resizeMode="contain"
           />
-
-          {/* STATUS DOT */}
 
           <View
             style={styles.statusCircle}
@@ -262,14 +485,124 @@ export default function HomeScreen() {
           {getGreeting()}
         </Text>
 
-        <Text style={styles.welcomeText}>
+        <Text
+          style={styles.welcomeText}
+        >
           Everything about your vehicle,
           {'\n'}in one place.
         </Text>
 
-        {/* VEHICLE CARD */}
+        {/* -------------------------------- */}
+        {/* VEHICLE SWITCHER */}
+        {/* -------------------------------- */}
 
-        {vehicle ? (
+        {vehicles.length > 1 && (
+          <>
+            <View
+              style={styles.vehicleSwitcherHeader}
+            >
+              <Text
+                style={
+                  styles.vehicleSwitcherTitle
+                }
+              >
+                YOUR VEHICLES
+              </Text>
+
+              <Text
+                style={
+                  styles.vehicleSwitcherCount
+                }
+              >
+                {vehicles.length}{' '}
+                VEHICLES
+              </Text>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={
+                false
+              }
+              contentContainerStyle={
+                styles.vehicleSwitcher
+              }
+            >
+              {vehicles.map(
+                (item) => {
+                  const isSelected =
+                    selectedVehicle?.id ===
+                    item.id;
+
+                  return (
+                    <Pressable
+                      key={item.id}
+                      style={[
+                        styles.vehiclePill,
+                        isSelected &&
+                          styles.vehiclePillSelected,
+                      ]}
+                      onPress={() =>
+                        switchVehicle(
+                          item
+                        )
+                      }
+                    >
+                      <View
+                        style={
+                          styles.vehiclePillInfo
+                        }
+                      >
+                        <Text
+                          numberOfLines={
+                            1
+                          }
+                          style={[
+                            styles.vehiclePillName,
+                            isSelected &&
+                              styles.vehiclePillNameSelected,
+                          ]}
+                        >
+                          {
+                            item.vehicle_name
+                          }
+                        </Text>
+
+                        <Text
+                          style={[
+                            styles.vehiclePillRegistration,
+                            isSelected &&
+                              styles.vehiclePillRegistrationSelected,
+                          ]}
+                        >
+                          {
+                            item.registration_number
+                          }
+                        </Text>
+                      </View>
+
+                      {isSelected && (
+                        <Text
+                          style={
+                            styles.vehiclePillCheck
+                          }
+                        >
+                          ✓
+                        </Text>
+                      )}
+                    </Pressable>
+                  );
+                }
+              )}
+            </ScrollView>
+          </>
+        )}
+
+        {/* -------------------------------- */}
+        {/* VEHICLE CARD */}
+        {/* -------------------------------- */}
+
+        {selectedVehicle ? (
           <Pressable
             style={styles.vehicleCard}
             onPress={() =>
@@ -278,14 +611,53 @@ export default function HomeScreen() {
               )
             }
           >
+
+            {/* CAR IMAGE */}
+
+            {vehicleImage ? (
+              <ImageBackground
+                source={{
+                  uri: vehicleImage,
+                }}
+                style={
+                  styles.vehicleBackground
+                }
+                imageStyle={
+                  styles.vehicleBackgroundImage
+                }
+              >
+                <View
+                  style={
+                    styles.vehicleImageOverlay
+                  }
+                />
+              </ImageBackground>
+            ) : (
+              <View
+                style={
+                  styles.vehicleFallbackBackground
+                }
+              />
+            )}
+
+            {/* DARK GLOW */}
+
             <View
               style={styles.vehicleGlow}
             />
 
+            {/* VEHICLE TOP */}
+
             <View
-              style={styles.vehicleTop}
+              style={
+                styles.vehicleTop
+              }
             >
-              <View>
+              <View
+                style={
+                  styles.vehicleTextArea
+                }
+              >
                 <Text
                   style={
                     styles.vehicleLabel
@@ -295,11 +667,15 @@ export default function HomeScreen() {
                 </Text>
 
                 <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
                   style={
                     styles.vehicleName
                   }
                 >
-                  {vehicle.vehicle_name}
+                  {
+                    selectedVehicle.vehicle_name
+                  }
                 </Text>
 
                 <Text
@@ -308,13 +684,15 @@ export default function HomeScreen() {
                   }
                 >
                   {
-                    vehicle.registration_number
+                    selectedVehicle.registration_number
                   }
                 </Text>
               </View>
 
               <View
-                style={styles.arrowCircle}
+                style={
+                  styles.arrowCircle
+                }
               >
                 <Text
                   style={styles.arrow}
@@ -323,6 +701,8 @@ export default function HomeScreen() {
                 </Text>
               </View>
             </View>
+
+            {/* VEHICLE BOTTOM */}
 
             <View
               style={
@@ -351,11 +731,15 @@ export default function HomeScreen() {
                 }
               >
                 <View
-                  style={styles.activeDot}
+                  style={
+                    styles.activeDot
+                  }
                 />
 
                 <Text
-                  style={styles.statusText}
+                  style={
+                    styles.statusText
+                  }
                 >
                   Active
                 </Text>
@@ -372,13 +756,17 @@ export default function HomeScreen() {
             }
           >
             <Text
-              style={styles.emptyIcon}
+              style={
+                styles.emptyIcon
+              }
             >
               ＋
             </Text>
 
             <Text
-              style={styles.emptyTitle}
+              style={
+                styles.emptyTitle
+              }
             >
               Add your vehicle
             </Text>
@@ -392,32 +780,44 @@ export default function HomeScreen() {
           </Pressable>
         )}
 
-        {vehicle && (
-          <>
-            {/* VEHICLE OVERVIEW */}
+        {/* -------------------------------- */}
+        {/* VEHICLE OVERVIEW */}
+        {/* -------------------------------- */}
 
+        {selectedVehicle && (
+          <>
             <View
-              style={styles.sectionHeader}
+              style={
+                styles.sectionHeader
+              }
             >
               <Text
-                style={styles.sectionTitle}
+                style={
+                  styles.sectionTitle
+                }
               >
                 Vehicle Overview
               </Text>
 
               <Text
-                style={styles.sectionSmall}
+                style={
+                  styles.sectionSmall
+                }
               >
                 LIVE
               </Text>
             </View>
 
-            <View style={styles.grid}>
+            <View
+              style={styles.grid}
+            >
 
               {/* SERVICE */}
 
               <Pressable
-                style={styles.infoCard}
+                style={
+                  styles.infoCard
+                }
                 onPress={() =>
                   router.push(
                     '/vehicle/details'
@@ -425,7 +825,9 @@ export default function HomeScreen() {
                 }
               >
                 <View
-                  style={styles.iconBox}
+                  style={
+                    styles.iconBox
+                  }
                 >
                   <Text
                     style={styles.icon}
@@ -435,23 +837,31 @@ export default function HomeScreen() {
                 </View>
 
                 <Text
-                  style={styles.infoTitle}
+                  style={
+                    styles.infoTitle
+                  }
                 >
                   Service
                 </Text>
 
                 <Text
-                  style={styles.infoValue}
+                  style={
+                    styles.infoValue
+                  }
                 >
-                  {nextServiceKm > 0
+                  {nextServiceKm >
+                  0
                     ? `${remainingServiceKm.toLocaleString()} km`
                     : 'Not set'}
                 </Text>
 
                 <Text
-                  style={styles.infoSub}
+                  style={
+                    styles.infoSub
+                  }
                 >
-                  {nextServiceKm > 0
+                  {nextServiceKm >
+                  0
                     ? 'until next service'
                     : 'Add service record'}
                 </Text>
@@ -460,7 +870,9 @@ export default function HomeScreen() {
               {/* FUEL */}
 
               <Pressable
-                style={styles.infoCard}
+                style={
+                  styles.infoCard
+                }
                 onPress={() =>
                   router.push(
                     '/explore'
@@ -468,7 +880,9 @@ export default function HomeScreen() {
                 }
               >
                 <View
-                  style={styles.iconBox}
+                  style={
+                    styles.iconBox
+                  }
                 >
                   <Text
                     style={styles.icon}
@@ -478,21 +892,28 @@ export default function HomeScreen() {
                 </View>
 
                 <Text
-                  style={styles.infoTitle}
+                  style={
+                    styles.infoTitle
+                  }
                 >
                   Fuel
                 </Text>
 
                 <Text
-                  style={styles.infoValue}
+                  style={
+                    styles.infoValue
+                  }
                 >
-                  {averageMileage > 0
+                  {averageMileage >
+                  0
                     ? `${averageMileage.toFixed(2)} km/L`
                     : 'No data'}
                 </Text>
 
                 <Text
-                  style={styles.infoSub}
+                  style={
+                    styles.infoSub
+                  }
                 >
                   Average mileage
                 </Text>
@@ -501,7 +922,9 @@ export default function HomeScreen() {
               {/* DOCUMENTS */}
 
               <Pressable
-                style={styles.infoCard}
+                style={
+                  styles.infoCard
+                }
                 onPress={() =>
                   router.push(
                     '/vehicle/documents'
@@ -509,7 +932,9 @@ export default function HomeScreen() {
                 }
               >
                 <View
-                  style={styles.iconBox}
+                  style={
+                    styles.iconBox
+                  }
                 >
                   <Text
                     style={styles.icon}
@@ -519,19 +944,25 @@ export default function HomeScreen() {
                 </View>
 
                 <Text
-                  style={styles.infoTitle}
+                  style={
+                    styles.infoTitle
+                  }
                 >
                   Documents
                 </Text>
 
                 <Text
-                  style={styles.infoValue}
+                  style={
+                    styles.infoValue
+                  }
                 >
                   Manage
                 </Text>
 
                 <Text
-                  style={styles.infoSub}
+                  style={
+                    styles.infoSub
+                  }
                 >
                   RC • PUC • Insurance
                 </Text>
@@ -540,7 +971,9 @@ export default function HomeScreen() {
               {/* EXPENSES */}
 
               <Pressable
-                style={styles.infoCard}
+                style={
+                  styles.infoCard
+                }
                 onPress={() =>
                   router.push(
                     '/explore'
@@ -548,7 +981,9 @@ export default function HomeScreen() {
                 }
               >
                 <View
-                  style={styles.iconBox}
+                  style={
+                    styles.iconBox
+                  }
                 >
                   <Text
                     style={styles.icon}
@@ -558,15 +993,20 @@ export default function HomeScreen() {
                 </View>
 
                 <Text
-                  style={styles.infoTitle}
+                  style={
+                    styles.infoTitle
+                  }
                 >
                   Expenses
                 </Text>
 
                 <Text
-                  style={styles.infoValue}
+                  style={
+                    styles.infoValue
+                  }
                 >
-                  {totalExpense > 0
+                  {totalExpense >
+                  0
                     ? `₹${totalExpense.toLocaleString(
                         'en-IN'
                       )}`
@@ -574,15 +1014,18 @@ export default function HomeScreen() {
                 </Text>
 
                 <Text
-                  style={styles.infoSub}
+                  style={
+                    styles.infoSub
+                  }
                 >
                   Fuel + Service
                 </Text>
               </Pressable>
-
             </View>
 
+            {/* -------------------------------- */}
             {/* SMART TRACKING */}
+            {/* -------------------------------- */}
 
             <View
               style={
@@ -611,9 +1054,10 @@ export default function HomeScreen() {
                   styles.calculationRow
                 }
               >
-
                 <View
-                  style={styles.statBlock}
+                  style={
+                    styles.statBlock
+                  }
                 >
                   <Text
                     style={
@@ -641,14 +1085,17 @@ export default function HomeScreen() {
                 />
 
                 <View
-                  style={styles.statBlock}
+                  style={
+                    styles.statBlock
+                  }
                 >
                   <Text
                     style={
                       styles.calculationNumber
                     }
                   >
-                    {averageMileage > 0
+                    {averageMileage >
+                    0
                       ? averageMileage.toFixed(
                           1
                         )
@@ -671,16 +1118,20 @@ export default function HomeScreen() {
                 />
 
                 <View
-                  style={styles.statBlock}
+                  style={
+                    styles.statBlock
+                  }
                 >
                   <Text
                     style={
                       styles.calculationNumber
                     }
                   >
-                    {totalExpense > 0
+                    {totalExpense >
+                    0
                       ? `₹${(
-                          totalExpense / 1000
+                          totalExpense /
+                          1000
                         ).toFixed(1)}K`
                       : '--'}
                   </Text>
@@ -693,17 +1144,20 @@ export default function HomeScreen() {
                     EXPENSE
                   </Text>
                 </View>
-
               </View>
             </View>
 
+            {/* -------------------------------- */}
             {/* RECENT ACTIVITY */}
+            {/* -------------------------------- */}
 
             <View
               style={styles.recentHeader}
             >
               <Text
-                style={styles.sectionTitle}
+                style={
+                  styles.sectionTitle
+                }
               >
                 Recent Activity
               </Text>
@@ -750,8 +1204,10 @@ export default function HomeScreen() {
                     }
                   >
                     {Number(
-                      lastService.service_km
-                    ).toLocaleString()} km
+                      lastService.service_km ||
+                        0
+                    ).toLocaleString()}{' '}
+                    km
                   </Text>
                 </View>
 
@@ -762,7 +1218,8 @@ export default function HomeScreen() {
                 >
                   ₹
                   {Number(
-                    lastService.service_cost
+                    lastService.service_cost ||
+                      0
                   ).toLocaleString(
                     'en-IN'
                   )}
@@ -770,7 +1227,9 @@ export default function HomeScreen() {
               </View>
             ) : (
               <View
-                style={styles.noActivity}
+                style={
+                  styles.noActivity
+                }
               >
                 <Text
                   style={
@@ -782,16 +1241,22 @@ export default function HomeScreen() {
               </View>
             )}
 
+            {/* -------------------------------- */}
             {/* QUICK ACTION */}
+            {/* -------------------------------- */}
 
             <Text
-              style={styles.sectionTitle}
+              style={
+                styles.sectionTitle
+              }
             >
               Quick Actions
             </Text>
 
             <Pressable
-              style={styles.addButton}
+              style={
+                styles.addButton
+              }
               onPress={() =>
                 router.push(
                   '/vehicle/add'
@@ -799,7 +1264,9 @@ export default function HomeScreen() {
               }
             >
               <View
-                style={styles.plusCircle}
+                style={
+                  styles.plusCircle
+                }
               >
                 <Text
                   style={styles.plus}
@@ -809,30 +1276,37 @@ export default function HomeScreen() {
               </View>
 
               <View
-                style={styles.addButtonText}
+                style={
+                  styles.addButtonText
+                }
               >
                 <Text
-                  style={styles.addTitle}
+                  style={
+                    styles.addTitle
+                  }
                 >
                   Add Vehicle
                 </Text>
 
                 <Text
-                  style={styles.addSub}
+                  style={
+                    styles.addSub
+                  }
                 >
                   Add another vehicle to VMA
                 </Text>
               </View>
 
               <Text
-                style={styles.addArrow}
+                style={
+                  styles.addArrow
+                }
               >
                 ›
               </Text>
             </Pressable>
           </>
         )}
-
       </ScrollView>
     </View>
   );
@@ -857,7 +1331,9 @@ const styles = StyleSheet.create({
     paddingBottom: 50,
   },
 
-  /* HEADER */
+  // --------------------------------
+  // HEADER
+  // --------------------------------
 
   header: {
     flexDirection: 'row',
@@ -889,7 +1365,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
 
-  /* GREETING */
+  // --------------------------------
+  // GREETING
+  // --------------------------------
 
   greeting: {
     color: '#FFFFFF',
@@ -899,14 +1377,96 @@ const styles = StyleSheet.create({
   },
 
   welcomeText: {
-    color: '#777',
+    color: '#777777',
     fontSize: 15,
     lineHeight: 22,
     marginTop: 7,
     marginBottom: 25,
   },
 
-  /* VEHICLE CARD */
+  // --------------------------------
+  // VEHICLE SWITCHER
+  // --------------------------------
+
+  vehicleSwitcherHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+
+  vehicleSwitcherTitle: {
+    color: '#777777',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 2,
+  },
+
+  vehicleSwitcherCount: {
+    color: '#555555',
+    fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+  },
+
+  vehicleSwitcher: {
+    paddingBottom: 15,
+    gap: 10,
+  },
+
+  vehiclePill: {
+    minWidth: 170,
+    maxWidth: 220,
+    minHeight: 58,
+    backgroundColor: '#111111',
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: '#292929',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  vehiclePillSelected: {
+    backgroundColor: '#1C1C1C',
+    borderColor: '#555555',
+  },
+
+  vehiclePillInfo: {
+    flex: 1,
+  },
+
+  vehiclePillName: {
+    color: '#AAAAAA',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  vehiclePillNameSelected: {
+    color: '#FFFFFF',
+  },
+
+  vehiclePillRegistration: {
+    color: '#666666',
+    fontSize: 10,
+    marginTop: 3,
+  },
+
+  vehiclePillRegistrationSelected: {
+    color: '#888888',
+  },
+
+  vehiclePillCheck: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    marginLeft: 8,
+  },
+
+  // --------------------------------
+  // VEHICLE CARD
+  // --------------------------------
 
   vehicleCard: {
     height: 245,
@@ -917,6 +1477,41 @@ const styles = StyleSheet.create({
     borderColor: '#292929',
     padding: 24,
     justifyContent: 'space-between',
+    position: 'relative',
+  },
+
+  vehicleBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+  },
+
+  vehicleBackgroundImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+
+  vehicleImageOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.20)',
+  },
+
+  vehicleFallbackBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#111111',
+    zIndex: 0,
   },
 
   vehicleGlow: {
@@ -927,16 +1522,23 @@ const styles = StyleSheet.create({
     right: -80,
     bottom: -100,
     backgroundColor: '#202020',
-    opacity: 0.8,
+    opacity: 0.25,
+    zIndex: 1,
   },
 
   vehicleTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    zIndex: 2,
+  },
+
+  vehicleTextArea: {
+    flex: 1,
+    paddingRight: 10,
   },
 
   vehicleLabel: {
-    color: '#777',
+    color: '#E0E0E0',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 2,
@@ -947,12 +1549,24 @@ const styles = StyleSheet.create({
     fontSize: 27,
     fontWeight: '800',
     marginTop: 7,
+    textShadowColor: 'rgba(0,0,0,0.7)',
+    textShadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    textShadowRadius: 4,
   },
 
   registration: {
-    color: '#999',
+    color: '#D0D0D0',
     fontSize: 15,
     marginTop: 4,
+    textShadowColor: 'rgba(0,0,0,0.7)',
+    textShadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    textShadowRadius: 3,
   },
 
   arrowCircle: {
@@ -965,7 +1579,7 @@ const styles = StyleSheet.create({
   },
 
   arrow: {
-    color: '#111',
+    color: '#111111',
     fontSize: 28,
     marginTop: -3,
   },
@@ -974,16 +1588,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
+    zIndex: 2,
   },
 
   kmValue: {
     color: '#FFFFFF',
     fontSize: 38,
     fontWeight: '800',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    textShadowRadius: 4,
   },
 
   kmLabel: {
-    color: '#777',
+    color: '#D0D0D0',
     fontSize: 9,
     fontWeight: '700',
     letterSpacing: 2,
@@ -993,7 +1614,7 @@ const styles = StyleSheet.create({
   vehicleStatus: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#191919',
+    backgroundColor: 'rgba(10,10,10,0.85)',
     borderRadius: 20,
     paddingVertical: 8,
     paddingHorizontal: 13,
@@ -1008,14 +1629,16 @@ const styles = StyleSheet.create({
   },
 
   statusText: {
-    color: '#AAA',
+    color: '#FFFFFF',
     fontSize: 12,
   },
 
-  /* EMPTY STATE */
+  // --------------------------------
+  // EMPTY STATE
+  // --------------------------------
 
   emptyCard: {
-    backgroundColor: '#111',
+    backgroundColor: '#111111',
     borderRadius: 28,
     padding: 30,
     borderWidth: 1,
@@ -1024,25 +1647,27 @@ const styles = StyleSheet.create({
   },
 
   emptyIcon: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontSize: 40,
   },
 
   emptyTitle: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontSize: 23,
     fontWeight: '800',
     marginTop: 10,
   },
 
   emptyText: {
-    color: '#777',
+    color: '#777777',
     fontSize: 14,
     marginTop: 7,
     textAlign: 'center',
   },
 
-  /* SECTIONS */
+  // --------------------------------
+  // SECTIONS
+  // --------------------------------
 
   sectionHeader: {
     flexDirection: 'row',
@@ -1061,13 +1686,15 @@ const styles = StyleSheet.create({
   },
 
   sectionSmall: {
-    color: '#777',
+    color: '#777777',
     fontSize: 9,
     fontWeight: '700',
     letterSpacing: 2,
   },
 
-  /* INFORMATION GRID */
+  // --------------------------------
+  // INFORMATION GRID
+  // --------------------------------
 
   grid: {
     flexDirection: 'row',
@@ -1101,7 +1728,7 @@ const styles = StyleSheet.create({
   },
 
   infoTitle: {
-    color: '#777',
+    color: '#777777',
     fontSize: 12,
   },
 
@@ -1113,12 +1740,14 @@ const styles = StyleSheet.create({
   },
 
   infoSub: {
-    color: '#666',
+    color: '#666666',
     fontSize: 11,
     marginTop: 4,
   },
 
-  /* SMART TRACKING */
+  // --------------------------------
+  // SMART TRACKING
+  // --------------------------------
 
   calculationCard: {
     backgroundColor: '#111111',
@@ -1130,7 +1759,7 @@ const styles = StyleSheet.create({
   },
 
   calculationLabel: {
-    color: '#777',
+    color: '#777777',
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 2,
@@ -1163,7 +1792,7 @@ const styles = StyleSheet.create({
   },
 
   calculationUnit: {
-    color: '#666',
+    color: '#666666',
     fontSize: 8,
     marginTop: 4,
     textAlign: 'center',
@@ -1172,10 +1801,12 @@ const styles = StyleSheet.create({
   calculationDivider: {
     width: 1,
     height: 38,
-    backgroundColor: '#333',
+    backgroundColor: '#333333',
   },
 
-  /* RECENT ACTIVITY */
+  // --------------------------------
+  // RECENT ACTIVITY
+  // --------------------------------
 
   recentHeader: {
     marginTop: 5,
@@ -1216,7 +1847,7 @@ const styles = StyleSheet.create({
   },
 
   activitySub: {
-    color: '#666',
+    color: '#666666',
     fontSize: 12,
     marginTop: 4,
   },
@@ -1236,11 +1867,13 @@ const styles = StyleSheet.create({
   },
 
   noActivityText: {
-    color: '#666',
+    color: '#666666',
     fontSize: 13,
   },
 
-  /* QUICK ACTION */
+  // --------------------------------
+  // QUICK ACTION
+  // --------------------------------
 
   addButton: {
     backgroundColor: '#FFFFFF',
@@ -1254,7 +1887,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#111',
+    backgroundColor: '#111111',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1271,19 +1904,19 @@ const styles = StyleSheet.create({
   },
 
   addTitle: {
-    color: '#111',
+    color: '#111111',
     fontSize: 16,
     fontWeight: '800',
   },
 
   addSub: {
-    color: '#777',
+    color: '#777777',
     fontSize: 11,
     marginTop: 3,
   },
 
   addArrow: {
-    color: '#111',
+    color: '#111111',
     fontSize: 27,
     marginRight: 5,
   },
