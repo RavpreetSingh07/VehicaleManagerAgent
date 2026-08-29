@@ -1,8 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -14,20 +14,24 @@ export default function TabLayout() {
       screenOptions={{
         tabBarActiveTintColor:
           Colors[colorScheme ?? 'light'].tint,
+        tabBarInactiveTintColor: '#777',
         headerShown: false,
         tabBarButton: HapticTab,
       }}
     >
       {/* HOME */}
-
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol
-              size={28}
-              name="house.fill"
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={
+                focused
+                  ? 'home'
+                  : 'home-outline'
+              }
+              size={27}
               color={color}
             />
           ),
@@ -35,15 +39,18 @@ export default function TabLayout() {
       />
 
       {/* FUEL */}
-
       <Tabs.Screen
         name="explore"
         options={{
           title: 'Fuel',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol
-              size={28}
-              name="drop.fill"
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={
+                focused
+                  ? 'water'
+                  : 'water-outline'
+              }
+              size={27}
               color={color}
             />
           ),
@@ -51,15 +58,18 @@ export default function TabLayout() {
       />
 
       {/* YOU */}
-
       <Tabs.Screen
         name="you"
         options={{
           title: 'You',
-          tabBarIcon: ({ color }) => (
-            <IconSymbol
-              size={28}
-              name="person.fill"
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={
+                focused
+                  ? 'person'
+                  : 'person-outline'
+              }
+              size={27}
               color={color}
             />
           ),

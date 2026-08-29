@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import { useVehicle } from '@/context/VehicleContext';
 import { supabase } from '@/lib/supabase';
 
 type FuelEntry = {
@@ -27,35 +28,98 @@ type FuelEntry = {
 };
 
 export default function FuelScreen() {
-  const [previousKm, setPreviousKm] = useState('');
-  const [currentKm, setCurrentKm] = useState('');
-  const [fuelLitres, setFuelLitres] = useState('');
-  const [fuelCost, setFuelCost] = useState('');
+  const {
+    selectedVehicle,
+    selectedVehicleId,
+  } = useVehicle();
 
-  const [entries, setEntries] = useState<FuelEntry[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [previousKm, setPreviousKm] =
+    useState('');
+
+  const [currentKm, setCurrentKm] =
+    useState('');
+
+  const [fuelLitres, setFuelLitres] =
+    useState('');
+
+  const [fuelCost, setFuelCost] =
+    useState('');
+
+  const [entries, setEntries] =
+    useState<FuelEntry[]>([]);
+
+  const [loadingHistory, setLoadingHistory] =
+    useState(true);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [message, setMessage] =
+    useState('');
+
+  // --------------------------------
+  // LIVE FORM VALUES
+  // --------------------------------
 
   const previous = Number(previousKm);
   const current = Number(currentKm);
   const litres = Number(fuelLitres);
   const cost = Number(fuelCost);
 
-  const distance =
+  const formDistance =
     current > previous && previous > 0
       ? current - previous
       : 0;
 
-  const mileage =
-    distance > 0 && litres > 0
-      ? distance / litres
+  const formMileage =
+    formDistance > 0 && litres > 0
+      ? formDistance / litres
       : 0;
 
-  const costPerKm =
-    distance > 0 && cost > 0
-      ? cost / distance
+  const formCostPerKm =
+    formDistance > 0 && cost > 0
+      ? cost / formDistance
       : 0;
+
+  // --------------------------------
+  // LATEST SAVED ENTRY
+  // --------------------------------
+
+  const latestEntry =
+    entries.length > 0
+      ? entries[0]
+      : null;
+
+  // --------------------------------
+  // DISPLAY CALCULATION
+  //
+  // Use live form calculation when
+  // user is entering a new entry.
+  //
+  // Otherwise show the latest saved
+  // calculation for this vehicle.
+  // --------------------------------
+
+  const displayDistance =
+    formDistance > 0
+      ? formDistance
+      : Number(
+          latestEntry?.distance_km || 0
+        );
+
+  const displayMileage =
+    formMileage > 0
+      ? formMileage
+      : Number(
+          latestEntry?.mileage || 0
+        );
+
+  const displayCostPerKm =
+    formCostPerKm > 0
+      ? formCostPerKm
+      : Number(
+          latestEntry?.cost_per_km || 0
+        );
 
   // --------------------------------
   // LOAD FUEL HISTORY
@@ -65,48 +129,76 @@ export default function FuelScreen() {
     setLoadingHistory(true);
 
     try {
+      // No selected vehicle = no fuel data.
+      if (!selectedVehicleId) {
+        setEntries([]);
+        return;
+      }
+
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!user) {
-        setLoadingHistory(false);
+        setEntries([]);
         return;
       }
 
-      const { data, error } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from('fuel_entries')
         .select(
           'id, previous_km, current_km, fuel_litres, fuel_cost, distance_km, mileage, cost_per_km, created_at'
         )
         .eq('user_id', user.id)
+        .eq(
+          'vehicle_id',
+          selectedVehicleId
+        )
         .order('created_at', {
           ascending: false,
         });
 
       if (error) {
         console.log(
-          'History error:',
+          'Fuel history error:',
           error.message
         );
-      } else {
-        setEntries(
-          (data || []) as FuelEntry[]
-        );
+
+        setEntries([]);
+        return;
       }
+
+      setEntries(
+        (data || []) as FuelEntry[]
+      );
     } catch (error) {
       console.log(
-        'History error:',
+        'Fuel history error:',
         error
       );
-    }
 
-    setLoadingHistory(false);
+      setEntries([]);
+    } finally {
+      setLoadingHistory(false);
+    }
   };
 
+  // --------------------------------
+  // RELOAD WHEN VEHICLE CHANGES
+  // --------------------------------
+
   useEffect(() => {
+    setPreviousKm('');
+    setCurrentKm('');
+    setFuelLitres('');
+    setFuelCost('');
+    setMessage('');
+
     loadFuelHistory();
-  }, []);
+  }, [selectedVehicleId]);
 
   // --------------------------------
   // SAVE FUEL ENTRY
@@ -141,6 +233,13 @@ export default function FuelScreen() {
       return;
     }
 
+    if (!selectedVehicleId) {
+      setMessage(
+        'Please select a vehicle first.'
+      );
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -153,43 +252,32 @@ export default function FuelScreen() {
         setMessage(
           'Please log in again.'
         );
-        setSaving(false);
         return;
       }
 
-      const {
-        data: vehicle,
-        error: vehicleError,
-      } = await supabase
-        .from('vehicles')
-        .select('id')
-        .eq('user_id', user.id)
-        .order('created_at', {
-          ascending: false,
-        })
-        .limit(1)
-        .maybeSingle();
-
-      if (
-        vehicleError ||
-        !vehicle
-      ) {
-        setMessage(
-          'No vehicle found.'
-        );
-        setSaving(false);
-        return;
-      }
+      // --------------------------------
+      // SAVE TO THE SELECTED VEHICLE
+      // --------------------------------
 
       const { error } = await supabase
         .from('fuel_entries')
         .insert({
-          vehicle_id: vehicle.id,
+          vehicle_id:
+            selectedVehicleId,
+
           user_id: user.id,
-          previous_km: previous,
-          current_km: current,
-          fuel_litres: litres,
-          fuel_cost: cost,
+
+          previous_km:
+            previous,
+
+          current_km:
+            current,
+
+          fuel_litres:
+            litres,
+
+          fuel_cost:
+            cost,
         });
 
       if (error) {
@@ -202,7 +290,6 @@ export default function FuelScreen() {
           `Save failed: ${error.message}`
         );
 
-        setSaving(false);
         return;
       }
 
@@ -218,46 +305,48 @@ export default function FuelScreen() {
       await loadFuelHistory();
     } catch (error) {
       console.log(
-        'Save error:',
+        'Fuel save error:',
         error
       );
 
       setMessage(
         'Something went wrong.'
       );
+    } finally {
+      setSaving(false);
     }
-
-    setSaving(false);
   };
 
   // --------------------------------
   // STATISTICS
   // --------------------------------
 
-  const totalFuel = entries.reduce(
-    (sum, entry) =>
-      sum +
-      Number(
-        entry.fuel_litres
-      ),
-    0
-  );
+  const totalFuel =
+    entries.reduce(
+      (sum, entry) =>
+        sum +
+        Number(
+          entry.fuel_litres || 0
+        ),
+      0
+    );
 
-  const totalCost = entries.reduce(
-    (sum, entry) =>
-      sum +
-      Number(
-        entry.fuel_cost
-      ),
-    0
-  );
+  const totalCost =
+    entries.reduce(
+      (sum, entry) =>
+        sum +
+        Number(
+          entry.fuel_cost || 0
+        ),
+      0
+    );
 
   const totalDistance =
     entries.reduce(
       (sum, entry) =>
         sum +
         Number(
-          entry.distance_km
+          entry.distance_km || 0
         ),
       0
     );
@@ -272,17 +361,24 @@ export default function FuelScreen() {
       ? totalCost / totalDistance
       : 0;
 
-  const bestMileage =
-    entries.length > 0
-      ? Math.max(
-          ...entries.map(
-            (entry) =>
-              Number(
-                entry.mileage
-              )
-          )
-        )
-      : 0;
+  // --------------------------------
+  // LOADING SCREEN
+  // --------------------------------
+
+  if (loadingHistory) {
+    return (
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator
+          size="large"
+          color="#FFFFFF"
+        />
+      </View>
+    );
+  }
+
+  // --------------------------------
+  // SCREEN
+  // --------------------------------
 
   return (
     <KeyboardAvoidingView
@@ -302,8 +398,9 @@ export default function FuelScreen() {
         }
         keyboardShouldPersistTaps="handled"
       >
-
+        {/* -------------------------------- */}
         {/* HEADER */}
+        {/* -------------------------------- */}
 
         <View style={styles.header}>
           <Image
@@ -325,7 +422,9 @@ export default function FuelScreen() {
           </View>
         </View>
 
+        {/* -------------------------------- */}
         {/* TITLE */}
+        {/* -------------------------------- */}
 
         <Text style={styles.title}>
           Fuel & Mileage
@@ -337,7 +436,73 @@ export default function FuelScreen() {
           vehicle is running.
         </Text>
 
+        {/* -------------------------------- */}
+        {/* SELECTED VEHICLE */}
+        {/* -------------------------------- */}
+
+        {selectedVehicle ? (
+          <View
+            style={
+              styles.selectedVehicleCard
+            }
+          >
+            <View>
+              <Text
+                style={
+                  styles.selectedVehicleLabel
+                }
+              >
+                TRACKING VEHICLE
+              </Text>
+
+              <Text
+                style={
+                  styles.selectedVehicleName
+                }
+              >
+                {
+                  selectedVehicle.vehicle_name
+                }
+              </Text>
+
+              <Text
+                style={
+                  styles.selectedVehicleRegistration
+                }
+              >
+                {
+                  selectedVehicle.registration_number
+                }
+              </Text>
+            </View>
+
+            <Text
+              style={
+                styles.selectedVehicleCheck
+              }
+            >
+              ✓
+            </Text>
+          </View>
+        ) : (
+          <View
+            style={
+              styles.selectedVehicleCard
+            }
+          >
+            <Text
+              style={
+                styles.selectedVehicleName
+              }
+            >
+              No vehicle selected
+            </Text>
+          </View>
+        )}
+
+        {/* -------------------------------- */}
         {/* CURRENT CALCULATION */}
+        {/* -------------------------------- */}
 
         <View
           style={styles.resultCard}
@@ -351,8 +516,8 @@ export default function FuelScreen() {
           <Text
             style={styles.mileage}
           >
-            {mileage > 0
-              ? mileage.toFixed(2)
+            {displayMileage > 0
+              ? displayMileage.toFixed(2)
               : '--'}
           </Text>
 
@@ -381,8 +546,8 @@ export default function FuelScreen() {
               <Text
                 style={styles.smallValue}
               >
-                {distance > 0
-                  ? `${distance.toLocaleString()} km`
+                {displayDistance > 0
+                  ? `${displayDistance.toLocaleString()} km`
                   : '--'}
               </Text>
             </View>
@@ -397,15 +562,17 @@ export default function FuelScreen() {
               <Text
                 style={styles.smallValue}
               >
-                {costPerKm > 0
-                  ? `₹${costPerKm.toFixed(2)}`
+                {displayCostPerKm > 0
+                  ? `₹${displayCostPerKm.toFixed(2)}`
                   : '--'}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* STATISTICS */}
+        {/* -------------------------------- */}
+        {/* FUEL STATISTICS */}
+        {/* -------------------------------- */}
 
         <Text
           style={styles.sectionTitle}
@@ -416,6 +583,7 @@ export default function FuelScreen() {
         <View
           style={styles.statsGrid}
         >
+          {/* AVERAGE */}
 
           <View
             style={styles.statCard}
@@ -443,6 +611,8 @@ export default function FuelScreen() {
             </Text>
           </View>
 
+          {/* TOTAL FUEL */}
+
           <View
             style={styles.statCard}
           >
@@ -466,6 +636,8 @@ export default function FuelScreen() {
               LITRES
             </Text>
           </View>
+
+          {/* TOTAL SPENT */}
 
           <View
             style={styles.statCard}
@@ -495,6 +667,8 @@ export default function FuelScreen() {
             </Text>
           </View>
 
+          {/* COST / KM */}
+
           <View
             style={styles.statCard}
           >
@@ -522,10 +696,11 @@ export default function FuelScreen() {
               AVERAGE
             </Text>
           </View>
-
         </View>
 
-        {/* NEW ENTRY */}
+        {/* -------------------------------- */}
+        {/* NEW FUEL ENTRY */}
+        {/* -------------------------------- */}
 
         <Text
           style={styles.sectionTitle}
@@ -536,6 +711,7 @@ export default function FuelScreen() {
         <View
           style={styles.formCard}
         >
+          {/* PREVIOUS KM */}
 
           <View
             style={styles.inputGroup}
@@ -558,6 +734,8 @@ export default function FuelScreen() {
             />
           </View>
 
+          {/* CURRENT KM */}
+
           <View
             style={styles.inputGroup}
           >
@@ -578,6 +756,8 @@ export default function FuelScreen() {
               style={styles.input}
             />
           </View>
+
+          {/* FUEL */}
 
           <View
             style={styles.inputGroup}
@@ -614,6 +794,8 @@ export default function FuelScreen() {
             </View>
           </View>
 
+          {/* COST */}
+
           <View
             style={styles.inputGroup}
           >
@@ -649,6 +831,8 @@ export default function FuelScreen() {
             </View>
           </View>
 
+          {/* SAVE */}
+
           <Pressable
             style={[
               styles.saveButton,
@@ -658,11 +842,14 @@ export default function FuelScreen() {
             onPress={
               saveFuelEntry
             }
-            disabled={saving}
+            disabled={
+              saving ||
+              !selectedVehicleId
+            }
           >
             {saving ? (
               <ActivityIndicator
-                color="#000"
+                color="#000000"
               />
             ) : (
               <>
@@ -671,7 +858,9 @@ export default function FuelScreen() {
                     styles.saveText
                   }
                 >
-                  Save Fuel Entry
+                  {selectedVehicleId
+                    ? 'Save Fuel Entry'
+                    : 'Select a Vehicle First'}
                 </Text>
 
                 <Text
@@ -690,10 +879,11 @@ export default function FuelScreen() {
               {message}
             </Text>
           )}
-
         </View>
 
+        {/* -------------------------------- */}
         {/* FUEL HISTORY */}
+        {/* -------------------------------- */}
 
         <View
           style={
@@ -708,7 +898,9 @@ export default function FuelScreen() {
 
           {entries.length > 0 && (
             <Text
-              style={styles.entryCount}
+              style={
+                styles.entryCount
+              }
             >
               {entries.length}{' '}
               {entries.length === 1
@@ -718,17 +910,7 @@ export default function FuelScreen() {
           )}
         </View>
 
-        {loadingHistory ? (
-          <View
-            style={
-              styles.loadingHistory
-            }
-          >
-            <ActivityIndicator
-              color="#FFFFFF"
-            />
-          </View>
-        ) : entries.length === 0 ? (
+        {entries.length === 0 ? (
           <View
             style={styles.emptyCard}
           >
@@ -742,152 +924,159 @@ export default function FuelScreen() {
               style={styles.emptyText}
             >
               Your saved fuel entries
-              will appear here.
+              for this vehicle will appear
+              here.
             </Text>
           </View>
         ) : (
-          entries.map(
-            (entry) => (
+          entries.map((entry) => (
+            <View
+              key={entry.id}
+              style={
+                styles.historyCard
+              }
+            >
+              {/* HISTORY HEADER */}
+
               <View
-                key={entry.id}
                 style={
-                  styles.historyCard
+                  styles.historyTop
                 }
               >
-                <View
-                  style={
-                    styles.historyTop
-                  }
-                >
-                  <View>
-                    <Text
-                      style={
-                        styles.historyKm
-                      }
-                    >
-                      {Number(
-                        entry.current_km
-                      ).toLocaleString()}{' '}
-                      km
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.historyDate
-                      }
-                    >
-                      {new Date(
-                        entry.created_at
-                      ).toLocaleDateString()}
-                    </Text>
-                  </View>
+                <View>
+                  <Text
+                    style={
+                      styles.historyKm
+                    }
+                  >
+                    {Number(
+                      entry.current_km
+                    ).toLocaleString()}{' '}
+                    km
+                  </Text>
 
                   <Text
                     style={
-                      styles.historyCost
+                      styles.historyDate
                     }
                   >
-                    ₹
-                    {Number(
-                      entry.fuel_cost
-                    ).toFixed(0)}
+                    {new Date(
+                      entry.created_at
+                    ).toLocaleDateString()}
                   </Text>
-                </View>
-
-                <View
-                  style={
-                    styles.historyDivider
-                  }
-                />
-
-                <View
-                  style={
-                    styles.historyStats
-                  }
-                >
-
-                  <View>
-                    <Text
-                      style={
-                        styles.historyLabel
-                      }
-                    >
-                      FUEL
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.historyValue
-                      }
-                    >
-                      {Number(
-                        entry.fuel_litres
-                      ).toFixed(1)}{' '}
-                      L
-                    </Text>
-                  </View>
-
-                  <View>
-                    <Text
-                      style={
-                        styles.historyLabel
-                      }
-                    >
-                      DISTANCE
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.historyValue
-                      }
-                    >
-                      {Number(
-                        entry.distance_km
-                      ).toLocaleString()}{' '}
-                      km
-                    </Text>
-                  </View>
-
-                  <View>
-                    <Text
-                      style={
-                        styles.historyLabel
-                      }
-                    >
-                      MILEAGE
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.historyValue
-                      }
-                    >
-                      {Number(
-                        entry.mileage
-                      ).toFixed(2)}{' '}
-                      km/L
-                    </Text>
-                  </View>
-
                 </View>
 
                 <Text
                   style={
-                    styles.historyCostKm
+                    styles.historyCost
                   }
                 >
                   ₹
                   {Number(
-                    entry.cost_per_km
-                  ).toFixed(2)}{' '}
-                  / km
+                    entry.fuel_cost
+                  ).toFixed(0)}
                 </Text>
               </View>
-            )
-          )
+
+              {/* DIVIDER */}
+
+              <View
+                style={
+                  styles.historyDivider
+                }
+              />
+
+              {/* HISTORY STATS */}
+
+              <View
+                style={
+                  styles.historyStats
+                }
+              >
+                <View>
+                  <Text
+                    style={
+                      styles.historyLabel
+                    }
+                  >
+                    FUEL
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.historyValue
+                    }
+                  >
+                    {Number(
+                      entry.fuel_litres
+                    ).toFixed(1)}{' '}
+                    L
+                  </Text>
+                </View>
+
+                <View>
+                  <Text
+                    style={
+                      styles.historyLabel
+                    }
+                  >
+                    DISTANCE
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.historyValue
+                    }
+                  >
+                    {Number(
+                      entry.distance_km
+                    ).toLocaleString()}{' '}
+                    km
+                  </Text>
+                </View>
+
+                <View>
+                  <Text
+                    style={
+                      styles.historyLabel
+                    }
+                  >
+                    MILEAGE
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.historyValue
+                    }
+                  >
+                    {Number(
+                      entry.mileage
+                    ).toFixed(2)}{' '}
+                    km/L
+                  </Text>
+                </View>
+              </View>
+
+              {/* COST PER KM */}
+
+              <Text
+                style={
+                  styles.historyCostKm
+                }
+              >
+                ₹
+                {Number(
+                  entry.cost_per_km
+                ).toFixed(2)}{' '}
+                / km
+              </Text>
+            </View>
+          ))
         )}
 
+        {/* -------------------------------- */}
         {/* CALCULATION INFO */}
+        {/* -------------------------------- */}
 
         <View
           style={styles.exampleCard}
@@ -911,13 +1100,19 @@ export default function FuelScreen() {
             12.50 km/L
           </Text>
         </View>
-
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  loadingScreen: {
+    flex: 1,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
   container: {
     flex: 1,
     backgroundColor: '#000000',
@@ -928,6 +1123,10 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 60,
   },
+
+  // --------------------------------
+  // HEADER
+  // --------------------------------
 
   header: {
     flexDirection: 'row',
@@ -956,6 +1155,10 @@ const styles = StyleSheet.create({
     fontSize: 21,
   },
 
+  // --------------------------------
+  // TITLE
+  // --------------------------------
+
   title: {
     color: '#FFFFFF',
     fontSize: 32,
@@ -968,8 +1171,54 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     marginTop: 7,
-    marginBottom: 25,
+    marginBottom: 18,
   },
+
+  // --------------------------------
+  // SELECTED VEHICLE
+  // --------------------------------
+
+  selectedVehicleCard: {
+    backgroundColor: '#111111',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: '#292929',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  selectedVehicleLabel: {
+    color: '#666666',
+    fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+
+  selectedVehicleName: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 5,
+  },
+
+  selectedVehicleRegistration: {
+    color: '#666666',
+    fontSize: 11,
+    marginTop: 3,
+  },
+
+  selectedVehicleCheck: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+
+  // --------------------------------
+  // RESULT CARD
+  // --------------------------------
 
   resultCard: {
     backgroundColor: '#111111',
@@ -1026,6 +1275,10 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
+  // --------------------------------
+  // SECTION
+  // --------------------------------
+
   sectionTitle: {
     color: '#FFFFFF',
     fontSize: 21,
@@ -1033,6 +1286,10 @@ const styles = StyleSheet.create({
     marginTop: 30,
     marginBottom: 15,
   },
+
+  // --------------------------------
+  // STATISTICS
+  // --------------------------------
 
   statsGrid: {
     flexDirection: 'row',
@@ -1078,6 +1335,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginTop: 3,
   },
+
+  // --------------------------------
+  // FORM
+  // --------------------------------
 
   formCard: {
     backgroundColor: '#111111',
@@ -1176,6 +1437,10 @@ const styles = StyleSheet.create({
     marginTop: 15,
   },
 
+  // --------------------------------
+  // HISTORY
+  // --------------------------------
+
   historyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1189,14 +1454,6 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     marginTop: 30,
     marginBottom: 15,
-  },
-
-  loadingHistory: {
-    backgroundColor: '#111111',
-    borderRadius: 20,
-    padding: 30,
-    borderWidth: 1,
-    borderColor: '#292929',
   },
 
   emptyCard: {
@@ -1282,6 +1539,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 15,
   },
+
+  // --------------------------------
+  // CALCULATION INFO
+  // --------------------------------
 
   exampleCard: {
     backgroundColor: '#0D0D0D',

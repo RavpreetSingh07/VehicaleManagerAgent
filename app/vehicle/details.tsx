@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  ImageBackground,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -9,17 +10,23 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
 
-import { supabase } from '../../lib/supabase';
+import {
+  useVehicle,
+} from '@/context/VehicleContext';
+
+import { supabase } from '@/lib/supabase';
+
 import {
   calculateNextServiceKm,
   calculateRemainingServiceKm,
-} from '../../lib/vehicleCalculations';
+} from '@/lib/vehicleCalculations';
 
 type ServiceEntry = {
   id: string;
+  vehicle_id: string;
   service_date: string;
   service_km: number;
   service_type: string;
@@ -27,100 +34,491 @@ type ServiceEntry = {
   notes: string | null;
 };
 
+type VehicleModel = Record<string, any> | null;
+
 export default function VehicleDetailsScreen() {
-  const [vehicle, setVehicle] = useState<any>(null);
-  const [services, setServices] = useState<ServiceEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingServices, setLoadingServices] = useState(true);
+  // --------------------------------
+  // GLOBAL VEHICLE CONTEXT
+  // --------------------------------
 
-  const [showAddService, setShowAddService] = useState(false);
-  const [savingService, setSavingService] = useState(false);
-  const [message, setMessage] = useState('');
+  const {
+    selectedVehicle,
+    loadingVehicles,
+    refreshVehicles,
+  } = useVehicle();
 
-  const [serviceDate, setServiceDate] = useState('');
-  const [serviceKm, setServiceKm] = useState('');
-  const [serviceType, setServiceType] = useState('');
-  const [serviceCost, setServiceCost] = useState('');
-  const [notes, setNotes] = useState('');
+  // --------------------------------
+  // MODEL / SPECIFICATION DATA
+  // --------------------------------
 
-  const loadVehicle = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  const [vehicleModel, setVehicleModel] =
+    useState<VehicleModel>(null);
 
-    if (!user) {
-      router.replace('/auth/login');
-      return;
+  const [vehicleImage, setVehicleImage] =
+    useState<string | null>(null);
+
+  const [loadingModel, setLoadingModel] =
+    useState(true);
+
+  // --------------------------------
+  // SERVICE DATA
+  // --------------------------------
+
+  const [services, setServices] =
+    useState<ServiceEntry[]>([]);
+
+  const [loadingServices, setLoadingServices] =
+    useState(true);
+
+  // --------------------------------
+  // SERVICE FORM
+  // --------------------------------
+
+  const [showAddService, setShowAddService] =
+    useState(false);
+
+  const [savingService, setSavingService] =
+    useState(false);
+
+  const [message, setMessage] =
+    useState('');
+
+  const [serviceDate, setServiceDate] =
+    useState('');
+
+  const [serviceKm, setServiceKm] =
+    useState('');
+
+  const [serviceType, setServiceType] =
+    useState('');
+
+  const [serviceCost, setServiceCost] =
+    useState('');
+
+  const [notes, setNotes] =
+    useState('');
+
+  // --------------------------------
+  // LOAD MODEL + IMAGE
+  // --------------------------------
+
+  const loadVehicleModel = async () => {
+    setLoadingModel(true);
+
+    try {
+      setVehicleModel(null);
+      setVehicleImage(null);
+
+      if (!selectedVehicle?.vehicle_model_id) {
+        return;
+      }
+
+      // --------------------------------
+      // LOAD VEHICLE MODEL
+      // --------------------------------
+
+      const {
+        data,
+        error,
+      } = await supabase
+        .from('vehicle_models')
+        .select('*')
+        .eq(
+          'id',
+          selectedVehicle.vehicle_model_id
+        )
+        .maybeSingle();
+
+      if (error) {
+        console.log(
+          'Vehicle model error:',
+          error.message
+        );
+      } else {
+        setVehicleModel(
+          (data || null) as VehicleModel
+        );
+
+        // --------------------------------
+        // DEFAULT MODEL IMAGE
+        // --------------------------------
+
+        if (data?.image_path) {
+          const {
+            data: imageData,
+          } = supabase.storage
+            .from('vehicle-models')
+            .getPublicUrl(
+              data.image_path
+            );
+
+          if (
+            imageData?.publicUrl
+          ) {
+            setVehicleImage(
+              imageData.publicUrl
+            );
+          }
+        }
+      }
+
+      // --------------------------------
+      // CUSTOM IMAGE OVERRIDES MODEL IMAGE
+      // --------------------------------
+
+      if (
+        selectedVehicle.custom_image_path
+      ) {
+        const {
+          data: customImage,
+        } = supabase.storage
+          .from('vehicle-models')
+          .getPublicUrl(
+            selectedVehicle.custom_image_path
+          );
+
+        if (
+          customImage?.publicUrl
+        ) {
+          setVehicleImage(
+            customImage.publicUrl
+          );
+        }
+      }
+    } catch (error) {
+      console.log(
+        'Vehicle model loading error:',
+        error
+      );
+    } finally {
+      setLoadingModel(false);
     }
-
-    const { data, error } = await supabase
-      .from('vehicles')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.log('Details error:', error.message);
-    }
-
-    setVehicle(data);
-    setLoading(false);
   };
+
+  // --------------------------------
+  // LOAD SERVICES
+  // --------------------------------
 
   const loadServices = async () => {
     setLoadingServices(true);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      if (!selectedVehicle?.id) {
+        setServices([]);
+        return;
+      }
 
-    if (!user) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace('/auth/login');
+        return;
+      }
+
+      const {
+        data,
+        error,
+      } = await supabase
+        .from('service_entries')
+        .select(
+          'id, vehicle_id, service_date, service_km, service_type, service_cost, notes'
+        )
+        .eq(
+          'user_id',
+          user.id
+        )
+        .eq(
+          'vehicle_id',
+          selectedVehicle.id
+        )
+        .order('service_date', {
+          ascending: false,
+        });
+
+      if (error) {
+        console.log(
+          'Service history error:',
+          error.message
+        );
+
+        setServices([]);
+        return;
+      }
+
+      setServices(
+        (data || []) as ServiceEntry[]
+      );
+    } catch (error) {
+      console.log(
+        'Service history error:',
+        error
+      );
+
+      setServices([]);
+    } finally {
       setLoadingServices(false);
+    }
+  };
+
+  // --------------------------------
+  // LOAD EVERYTHING WHEN VEHICLE CHANGES
+  // --------------------------------
+
+  useEffect(() => {
+    if (!selectedVehicle) {
+      setVehicleModel(null);
+      setVehicleImage(null);
+      setServices([]);
       return;
     }
 
-    const { data, error } = await supabase
-      .from('service_entries')
-      .select(
-        'id, service_date, service_km, service_type, service_cost, notes'
-      )
-      .eq('user_id', user.id)
-      .order('service_date', { ascending: false });
+    loadVehicleModel();
+    loadServices();
+  }, [selectedVehicle?.id]);
 
-    if (error) {
-      console.log('Service history error:', error.message);
-    } else {
-      setServices((data || []) as ServiceEntry[]);
+  // --------------------------------
+  // SPEC HELPER
+  // --------------------------------
+
+  const getSpec = (
+    ...keys: string[]
+  ) => {
+    for (const key of keys) {
+      const value =
+        vehicleModel?.[key];
+
+      if (
+        value !== undefined &&
+        value !== null &&
+        String(value).trim() !== ''
+      ) {
+        return value;
+      }
     }
 
-    setLoadingServices(false);
+    return null;
   };
 
-  useEffect(() => {
-    loadVehicle();
-    loadServices();
-  }, []);
+  // --------------------------------
+  // MODEL VALUES
+  // --------------------------------
+
+  const modelMake = getSpec(
+    'make',
+    'manufacturer',
+    'brand'
+  );
+
+  const modelName = getSpec(
+    'model',
+    'model_name'
+  );
+
+  const modelVariant = getSpec(
+    'variant',
+    'trim',
+    'variant_name'
+  );
+
+  const modelYear = getSpec(
+    'year',
+    'model_year'
+  );
+
+  const vehicleType = getSpec(
+    'vehicle_type',
+    'type'
+  );
+
+  const bodyType = getSpec(
+    'body_type',
+    'body'
+  );
+
+  const fuelType = getSpec(
+    'fuel_type',
+    'fuel'
+  );
+
+  const engineCc = getSpec(
+    'engine_cc',
+    'engine_displacement',
+    'displacement'
+  );
+
+  const cylinders = getSpec(
+    'cylinders',
+    'cylinder_count'
+  );
+
+  const power = getSpec(
+    'power',
+    'max_power',
+    'power_ps',
+    'bhp'
+  );
+
+  const torque = getSpec(
+    'torque',
+    'max_torque'
+  );
+
+  const transmission = getSpec(
+    'transmission',
+    'gearbox'
+  );
+
+  const drivetrain = getSpec(
+    'drivetrain',
+    'drive_type'
+  );
+
+  const seating = getSpec(
+    'seating_capacity',
+    'seats',
+    'seating'
+  );
+
+  const doors = getSpec(
+    'doors',
+    'number_of_doors'
+  );
+
+  const fuelTank = getSpec(
+    'fuel_tank_capacity',
+    'fuel_capacity',
+    'tank_capacity'
+  );
+
+  const mileage = getSpec(
+    'mileage',
+    'claimed_mileage',
+    'fuel_economy',
+    'economy'
+  );
+
+  const kerbWeight = getSpec(
+    'kerb_weight',
+    'curb_weight',
+    'weight'
+  );
+
+  const length = getSpec(
+    'length',
+    'length_mm'
+  );
+
+  const width = getSpec(
+    'width',
+    'width_mm'
+  );
+
+  const height = getSpec(
+    'height',
+    'height_mm'
+  );
+
+  const bootCapacity = getSpec(
+    'boot_capacity',
+    'boot_space',
+    'cargo_capacity'
+  );
+
+  const tyreSize = getSpec(
+    'tyre_size',
+    'tire_size',
+    'tyre_sizes',
+    'tire_sizes'
+  );
+
+  const batteryCapacity = getSpec(
+    'battery_capacity',
+    'battery_kwh'
+  );
+
+  const electricRange = getSpec(
+    'range',
+    'electric_range',
+    'range_km'
+  );
+
+  const chargingInfo = getSpec(
+    'charging_info',
+    'charging',
+    'charge_time'
+  );
+
+  const hasEngineSpecs =
+    engineCc ||
+    cylinders ||
+    power ||
+    torque ||
+    transmission ||
+    drivetrain;
+
+  const hasPracticalSpecs =
+    seating ||
+    doors ||
+    fuelTank ||
+    mileage ||
+    kerbWeight;
+
+  const hasDimensionSpecs =
+    length ||
+    width ||
+    height ||
+    bootCapacity ||
+    tyreSize;
+
+  const hasEvSpecs =
+    batteryCapacity ||
+    electricRange ||
+    chargingInfo;
+
+  // --------------------------------
+  // SAVE SERVICE
+  // --------------------------------
 
   const saveService = async () => {
     setMessage('');
 
-    if (!serviceKm || !serviceType || !serviceCost) {
-      setMessage('Please fill in service KM, type and cost.');
+    if (
+      !serviceKm ||
+      !serviceType ||
+      !serviceCost
+    ) {
+      setMessage(
+        'Please fill in service KM, type and cost.'
+      );
       return;
     }
 
-    const km = Number(serviceKm);
-    const cost = Number(serviceCost);
+    const km =
+      Number(serviceKm);
+
+    const cost =
+      Number(serviceCost);
 
     if (km <= 0) {
-      setMessage('Service KM must be greater than 0.');
+      setMessage(
+        'Service KM must be greater than 0.'
+      );
       return;
     }
 
     if (cost < 0) {
-      setMessage('Service cost cannot be negative.');
+      setMessage(
+        'Service cost cannot be negative.'
+      );
+      return;
+    }
+
+    if (!selectedVehicle?.id) {
+      setMessage(
+        'Please select a vehicle first.'
+      );
       return;
     }
 
@@ -132,32 +530,47 @@ export default function VehicleDetailsScreen() {
       } = await supabase.auth.getUser();
 
       if (!user) {
-        setMessage('Please log in again.');
-        setSavingService(false);
-        return;
-      }
-
-      if (!vehicle) {
-        setMessage('No vehicle found.');
-        setSavingService(false);
+        setMessage(
+          'Please log in again.'
+        );
         return;
       }
 
       const finalServiceDate =
         serviceDate ||
-        new Date().toISOString().split('T')[0];
+        new Date()
+          .toISOString()
+          .split('T')[0];
 
-      // 1. Save service history
-      const { error: serviceError } = await supabase
+      // --------------------------------
+      // SAVE SERVICE FOR SELECTED VEHICLE
+      // --------------------------------
+
+      const {
+        error: serviceError,
+      } = await supabase
         .from('service_entries')
         .insert({
-          vehicle_id: vehicle.id,
-          user_id: user.id,
-          service_date: finalServiceDate,
-          service_km: km,
-          service_type: serviceType,
-          service_cost: cost,
-          notes: notes || null,
+          vehicle_id:
+            selectedVehicle.id,
+
+          user_id:
+            user.id,
+
+          service_date:
+            finalServiceDate,
+
+          service_km:
+            km,
+
+          service_type:
+            serviceType,
+
+          service_cost:
+            cost,
+
+          notes:
+            notes || null,
         });
 
       if (serviceError) {
@@ -170,19 +583,32 @@ export default function VehicleDetailsScreen() {
           `Save failed: ${serviceError.message}`
         );
 
-        setSavingService(false);
         return;
       }
 
-      // 2. Update vehicle's latest service information
-      const { error: vehicleError } = await supabase
+      // --------------------------------
+      // UPDATE SELECTED VEHICLE
+      // --------------------------------
+
+      const {
+        error: vehicleError,
+      } = await supabase
         .from('vehicles')
         .update({
-          last_service_km: km,
-          last_service_date: finalServiceDate,
+          last_service_km:
+            km,
+
+          last_service_date:
+            finalServiceDate,
         })
-        .eq('id', vehicle.id)
-        .eq('user_id', user.id);
+        .eq(
+          'id',
+          selectedVehicle.id
+        )
+        .eq(
+          'user_id',
+          user.id
+        );
 
       if (vehicleError) {
         console.log(
@@ -194,18 +620,13 @@ export default function VehicleDetailsScreen() {
           `Service saved, but vehicle update failed: ${vehicleError.message}`
         );
 
-        setSavingService(false);
         return;
       }
 
-      // 3. Update vehicle shown on screen immediately
-      setVehicle({
-        ...vehicle,
-        last_service_km: km,
-        last_service_date: finalServiceDate,
-      });
+      // --------------------------------
+      // CLEAR FORM
+      // --------------------------------
 
-      // 4. Clear form
       setServiceDate('');
       setServiceKm('');
       setServiceType('');
@@ -214,20 +635,43 @@ export default function VehicleDetailsScreen() {
 
       setShowAddService(false);
 
-      // 5. Refresh service history
+      // --------------------------------
+      // REFRESH CONTEXT + SERVICE DATA
+      // --------------------------------
+
+      await refreshVehicles();
       await loadServices();
 
-      setMessage('✓ Service saved and vehicle updated');
+      setMessage(
+        '✓ Service saved and vehicle updated'
+      );
     } catch (error) {
-      console.log('Service error:', error);
-      setMessage('Something went wrong.');
-    }
+      console.log(
+        'Service error:',
+        error
+      );
 
-    setSavingService(false);
+      setMessage(
+        'Something went wrong.'
+      );
+    } finally {
+      setSavingService(false);
+    }
   };
 
-  const currentKm = Number(vehicle?.current_km) || 0;
-  const lastServiceKm = Number(vehicle?.last_service_km) || 0;
+  // --------------------------------
+  // CALCULATIONS
+  // --------------------------------
+
+  const currentKm =
+    Number(
+      selectedVehicle?.current_km
+    ) || 0;
+
+  const lastServiceKm =
+    Number(
+      selectedVehicle?.last_service_km
+    ) || 0;
 
   const serviceInterval = 5000;
 
@@ -248,15 +692,27 @@ export default function VehicleDetailsScreen() {
       : 0;
 
   const serviceDue =
-    remainingServiceKm === 0 && nextServiceKm > 0;
+    remainingServiceKm === 0 &&
+    nextServiceKm > 0;
 
-  const totalServiceCost = services.reduce(
-    (sum, service) =>
-      sum + Number(service.service_cost),
-    0
-  );
+  const totalServiceCost =
+    services.reduce(
+      (sum, service) =>
+        sum +
+        Number(
+          service.service_cost || 0
+        ),
+      0
+    );
 
-  if (loading) {
+  // --------------------------------
+  // LOADING
+  // --------------------------------
+
+  if (
+    loadingVehicles ||
+    loadingModel
+  ) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator
@@ -267,24 +723,54 @@ export default function VehicleDetailsScreen() {
     );
   }
 
-  if (!vehicle) {
+  // --------------------------------
+  // NO VEHICLE
+  // --------------------------------
+
+  if (!selectedVehicle) {
     return (
       <View style={styles.empty}>
-        <Text style={styles.emptyTitle}>
-          No vehicle found
+        <Text
+          style={styles.emptyTitle}
+        >
+          No vehicle selected
         </Text>
 
         <Pressable
           style={styles.button}
-          onPress={() => router.push('/vehicle/add')}
+          onPress={() =>
+            router.push(
+              '/vehicle/add'
+            )
+          }
         >
-          <Text style={styles.buttonText}>
+          <Text
+            style={styles.buttonText}
+          >
             Add Vehicle
           </Text>
         </Pressable>
       </View>
     );
   }
+
+  // --------------------------------
+  // DISPLAY NAME
+  // --------------------------------
+
+  const displayVehicleName =
+    modelMake &&
+    modelName
+      ? `${modelMake} ${modelName}`
+      : selectedVehicle.vehicle_name;
+
+  const displayVariant =
+    modelVariant ||
+    null;
+
+  // --------------------------------
+  // SCREEN
+  // --------------------------------
 
   return (
     <KeyboardAvoidingView
@@ -296,95 +782,1064 @@ export default function VehicleDetailsScreen() {
       }
     >
       <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+        contentContainerStyle={
+          styles.content
+        }
+        showsVerticalScrollIndicator={
+          false
+        }
         keyboardShouldPersistTaps="handled"
       >
-
+        {/* -------------------------------- */}
         {/* HEADER */}
+        {/* -------------------------------- */}
 
         <View style={styles.header}>
           <Pressable
-            style={styles.backCircle}
-            onPress={() => router.back()}
+            style={
+              styles.backCircle
+            }
+            onPress={() =>
+              router.back()
+            }
           >
-            <Text style={styles.backArrow}>
+            <Text
+              style={
+                styles.backArrow
+              }
+            >
               ‹
             </Text>
           </Pressable>
 
-          <Text style={styles.headerTitle}>
+          <Text
+            style={
+              styles.headerTitle
+            }
+          >
             Vehicle
           </Text>
 
-          <View style={styles.headerSpacer} />
+          <View
+            style={
+              styles.headerSpacer
+            }
+          />
         </View>
 
+        {/* -------------------------------- */}
         {/* VEHICLE HERO */}
+        {/* -------------------------------- */}
 
-        <View style={styles.heroCard}>
-          <Text style={styles.smallLabel}>
-            YOUR VEHICLE
-          </Text>
+        <View
+          style={styles.heroCard}
+        >
+          {vehicleImage ? (
+            <ImageBackground
+              source={{
+                uri: vehicleImage,
+              }}
+              style={
+                styles.heroImage
+              }
+              imageStyle={
+                styles.heroImageStyle
+              }
+            >
+              <View
+                style={
+                  styles.heroOverlay
+                }
+              />
 
-          <Text style={styles.vehicleName}>
-            {vehicle.vehicle_name}
-          </Text>
+              <View
+                style={
+                  styles.heroContent
+                }
+              >
+                <Text
+                  style={
+                    styles.smallLabel
+                  }
+                >
+                  YOUR VEHICLE
+                </Text>
 
-          <Text style={styles.registration}>
-            {vehicle.registration_number}
-          </Text>
+                <Text
+                  style={
+                    styles.vehicleName
+                  }
+                  numberOfLines={2}
+                >
+                  {displayVehicleName}
+                </Text>
 
-          <View style={styles.heroDivider} />
+                {displayVariant && (
+                  <Text
+                    style={
+                      styles.variantText
+                    }
+                  >
+                    {displayVariant}
+                    {modelYear
+                      ? ` • ${modelYear}`
+                      : ''}
+                  </Text>
+                )}
 
-          <Text style={styles.kmNumber}>
-            {currentKm.toLocaleString()}
-          </Text>
+                <Text
+                  style={
+                    styles.registration
+                  }
+                >
+                  {
+                    selectedVehicle.registration_number
+                  }
+                </Text>
 
-          <Text style={styles.kmLabel}>
-            CURRENT KM
-          </Text>
+                <View
+                  style={
+                    styles.heroDivider
+                  }
+                />
+
+                <Text
+                  style={
+                    styles.kmNumber
+                  }
+                >
+                  {currentKm.toLocaleString()}
+                </Text>
+
+                <Text
+                  style={
+                    styles.kmLabel
+                  }
+                >
+                  CURRENT KM
+                </Text>
+              </View>
+            </ImageBackground>
+          ) : (
+            <View
+              style={
+                styles.heroFallback
+              }
+            >
+              <Text
+                style={
+                  styles.smallLabel
+                }
+              >
+                YOUR VEHICLE
+              </Text>
+
+              <Text
+                style={
+                  styles.vehicleName
+                }
+                numberOfLines={2}
+              >
+                {displayVehicleName}
+              </Text>
+
+              {displayVariant && (
+                <Text
+                  style={
+                    styles.variantText
+                  }
+                >
+                  {displayVariant}
+                  {modelYear
+                    ? ` • ${modelYear}`
+                    : ''}
+                </Text>
+              )}
+
+              <Text
+                style={
+                  styles.registration
+                }
+              >
+                {
+                  selectedVehicle.registration_number
+                }
+              </Text>
+
+              <View
+                style={
+                  styles.heroDivider
+                }
+              />
+
+              <Text
+                style={
+                  styles.kmNumber
+                }
+              >
+                {currentKm.toLocaleString()}
+              </Text>
+
+              <Text
+                style={
+                  styles.kmLabel
+                }
+              >
+                CURRENT KM
+              </Text>
+            </View>
+          )}
         </View>
 
+        {/* -------------------------------- */}
         {/* VEHICLE INFORMATION */}
+        {/* -------------------------------- */}
 
-        <Text style={styles.sectionTitle}>
+        <Text
+          style={styles.sectionTitle}
+        >
           Vehicle Information
         </Text>
 
-        <View style={styles.infoGrid}>
-          <View style={styles.infoCard}>
-            <Text style={styles.infoLabel}>
-              Registration
+        <View
+          style={styles.infoGrid}
+        >
+          <View
+            style={styles.infoCard}
+          >
+            <Text
+              style={styles.infoLabel}
+            >
+              REGISTRATION
             </Text>
 
-            <Text style={styles.infoValue}>
-              {vehicle.registration_date || '-'}
+            <Text
+              style={styles.infoValue}
+            >
+              {
+                selectedVehicle.registration_number ||
+                '-'
+              }
             </Text>
           </View>
 
-          <View style={styles.infoCard}>
-            <Text style={styles.infoLabel}>
-              Current KM
+          <View
+            style={styles.infoCard}
+          >
+            <Text
+              style={styles.infoLabel}
+            >
+              REGISTRATION DATE
             </Text>
 
-            <Text style={styles.infoValue}>
-              {currentKm.toLocaleString()}
+            <Text
+              style={styles.infoValue}
+            >
+              {
+                selectedVehicle.registration_date ||
+                '-'
+              }
             </Text>
           </View>
         </View>
 
-        {/* SERVICE STATUS */}
+        {/* -------------------------------- */}
+        {/* MODEL SUMMARY */}
+        {/* -------------------------------- */}
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
+        {(vehicleType ||
+          bodyType ||
+          modelYear) && (
+          <View
+            style={styles.infoGrid}
+          >
+            {vehicleType && (
+              <View
+                style={
+                  styles.infoCard
+                }
+              >
+                <Text
+                  style={
+                    styles.infoLabel
+                  }
+                >
+                  VEHICLE TYPE
+                </Text>
+
+                <Text
+                  style={
+                    styles.infoValue
+                  }
+                >
+                  {String(
+                    vehicleType
+                  )}
+                </Text>
+              </View>
+            )}
+
+            {bodyType && (
+              <View
+                style={
+                  styles.infoCard
+                }
+              >
+                <Text
+                  style={
+                    styles.infoLabel
+                  }
+                >
+                  BODY TYPE
+                </Text>
+
+                <Text
+                  style={
+                    styles.infoValue
+                  }
+                >
+                  {String(
+                    bodyType
+                  )}
+                </Text>
+              </View>
+            )}
+
+            {modelYear && (
+              <View
+                style={
+                  styles.infoCard
+                }
+              >
+                <Text
+                  style={
+                    styles.infoLabel
+                  }
+                >
+                  MODEL YEAR
+                </Text>
+
+                <Text
+                  style={
+                    styles.infoValue
+                  }
+                >
+                  {String(
+                    modelYear
+                  )}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* -------------------------------- */}
+        {/* VEHICLE SPECIFICATIONS */}
+        {/* -------------------------------- */}
+
+        {vehicleModel && (
+          <>
+            <Text
+              style={
+                styles.sectionTitle
+              }
+            >
+              Vehicle Specifications
+            </Text>
+
+            {/* ENGINE / POWER */}
+
+            {hasEngineSpecs && (
+              <View
+                style={
+                  styles.specSection
+                }
+              >
+                <Text
+                  style={
+                    styles.specSectionTitle
+                  }
+                >
+                  ENGINE & PERFORMANCE
+                </Text>
+
+                <View
+                  style={
+                    styles.specGrid
+                  }
+                >
+                  {engineCc && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        ENGINE
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          engineCc
+                        )}{' '}
+                        cc
+                      </Text>
+                    </View>
+                  )}
+
+                  {cylinders && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        CYLINDERS
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          cylinders
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {power && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        POWER
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          power
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {torque && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        TORQUE
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          torque
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {transmission && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        TRANSMISSION
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          transmission
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {drivetrain && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        DRIVETRAIN
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          drivetrain
+                        )}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* FUEL */}
+
+            {(fuelType ||
+              fuelTank ||
+              mileage) && (
+              <View
+                style={
+                  styles.specSection
+                }
+              >
+                <Text
+                  style={
+                    styles.specSectionTitle
+                  }
+                >
+                  FUEL & ECONOMY
+                </Text>
+
+                <View
+                  style={
+                    styles.specGrid
+                  }
+                >
+                  {fuelType && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        FUEL TYPE
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          fuelType
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {mileage && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        MILEAGE
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          mileage
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {fuelTank && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        FUEL TANK
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          fuelTank
+                        )}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* PRACTICAL */}
+
+            {hasPracticalSpecs && (
+              <View
+                style={
+                  styles.specSection
+                }
+              >
+                <Text
+                  style={
+                    styles.specSectionTitle
+                  }
+                >
+                  PRACTICAL
+                </Text>
+
+                <View
+                  style={
+                    styles.specGrid
+                  }
+                >
+                  {seating && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        SEATING
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          seating
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {doors && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        DOORS
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          doors
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {kerbWeight && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        KERB WEIGHT
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          kerbWeight
+                        )}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* DIMENSIONS */}
+
+            {hasDimensionSpecs && (
+              <View
+                style={
+                  styles.specSection
+                }
+              >
+                <Text
+                  style={
+                    styles.specSectionTitle
+                  }
+                >
+                  DIMENSIONS
+                </Text>
+
+                <View
+                  style={
+                    styles.specGrid
+                  }
+                >
+                  {length && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        LENGTH
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          length
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {width && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        WIDTH
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          width
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {height && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        HEIGHT
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          height
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {bootCapacity && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        BOOT / CARGO
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          bootCapacity
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {tyreSize && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        TYRES
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          tyreSize
+                        )}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {/* EV */}
+
+            {hasEvSpecs && (
+              <View
+                style={
+                  styles.specSection
+                }
+              >
+                <Text
+                  style={
+                    styles.specSectionTitle
+                  }
+                >
+                  ELECTRIC / EV
+                </Text>
+
+                <View
+                  style={
+                    styles.specGrid
+                  }
+                >
+                  {batteryCapacity && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        BATTERY
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          batteryCapacity
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {electricRange && (
+                    <View
+                      style={
+                        styles.specCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        RANGE
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          electricRange
+                        )}
+                      </Text>
+                    </View>
+                  )}
+
+                  {chargingInfo && (
+                    <View
+                      style={
+                        styles.specWideCard
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.specLabel
+                        }
+                      >
+                        CHARGING
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.specValue
+                        }
+                      >
+                        {String(
+                          chargingInfo
+                        )}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+          </>
+        )}
+
+        {/* -------------------------------- */}
+        {/* NO SPECS YET */}
+        {/* -------------------------------- */}
+
+        {!vehicleModel && (
+          <View
+            style={
+              styles.noSpecsCard
+            }
+          >
+            <Text
+              style={
+                styles.noSpecsTitle
+              }
+            >
+              Vehicle specifications
+            </Text>
+
+            <Text
+              style={
+                styles.noSpecsText
+              }
+            >
+              Specifications will appear here
+              once this vehicle is connected
+              to the VMA vehicle catalogue.
+            </Text>
+          </View>
+        )}
+
+        {/* -------------------------------- */}
+        {/* SERVICE STATUS */}
+        {/* -------------------------------- */}
+
+        <View
+          style={styles.sectionHeader}
+        >
+          <Text
+            style={styles.sectionTitle}
+          >
             Service
           </Text>
 
           <Text
             style={[
               styles.status,
-              serviceDue && styles.statusDue,
+              serviceDue &&
+                styles.statusDue,
             ]}
           >
             {serviceDue
@@ -393,57 +1848,108 @@ export default function VehicleDetailsScreen() {
           </Text>
         </View>
 
-        <View style={styles.serviceCard}>
-          <View style={styles.serviceTop}>
+        <View
+          style={styles.serviceCard}
+        >
+          <View
+            style={styles.serviceTop}
+          >
             <View>
-              <Text style={styles.infoLabel}>
+              <Text
+                style={styles.infoLabel}
+              >
                 LAST SERVICE
               </Text>
 
-              <Text style={styles.serviceValue}>
+              <Text
+                style={
+                  styles.serviceValue
+                }
+              >
                 {lastServiceKm > 0
                   ? `${lastServiceKm.toLocaleString()} km`
                   : '-'}
               </Text>
             </View>
 
-            <View style={styles.serviceIcon}>
-              <Text style={styles.iconText}>
+            <View
+              style={
+                styles.serviceIcon
+              }
+            >
+              <Text
+                style={
+                  styles.iconText
+                }
+              >
                 🔧
               </Text>
             </View>
           </View>
 
-          <View style={styles.serviceDivider} />
+          <View
+            style={
+              styles.serviceDivider
+            }
+          />
 
-          <View style={styles.serviceRow}>
+          <View
+            style={
+              styles.serviceRow
+            }
+          >
             <View>
-              <Text style={styles.infoLabel}>
+              <Text
+                style={
+                  styles.infoLabel
+                }
+              >
                 NEXT SERVICE
               </Text>
 
-              <Text style={styles.serviceValue}>
+              <Text
+                style={
+                  styles.serviceValue
+                }
+              >
                 {nextServiceKm > 0
                   ? `${nextServiceKm.toLocaleString()} km`
                   : '-'}
               </Text>
             </View>
 
-            <View style={styles.remainingBox}>
-              <Text style={styles.remainingNumber}>
-                {remainingServiceKm > 0
+            <View
+              style={
+                styles.remainingBox
+              }
+            >
+              <Text
+                style={
+                  styles.remainingNumber
+                }
+              >
+                {remainingServiceKm >
+                0
                   ? remainingServiceKm.toLocaleString()
                   : '0'}
               </Text>
 
-              <Text style={styles.remainingLabel}>
+              <Text
+                style={
+                  styles.remainingLabel
+                }
+              >
                 KM LEFT
               </Text>
             </View>
           </View>
 
           {nextServiceKm > 0 && (
-            <View style={styles.progressBackground}>
+            <View
+              style={
+                styles.progressBackground
+              }
+            >
               <View
                 style={[
                   styles.progress,
@@ -464,29 +1970,53 @@ export default function VehicleDetailsScreen() {
             </View>
           )}
 
-          <Text style={styles.lastServiceDate}>
+          <Text
+            style={
+              styles.lastServiceDate
+            }
+          >
             Last service date:{' '}
-            {vehicle.last_service_date || '-'}
+            {
+              selectedVehicle.last_service_date ||
+              '-'
+            }
           </Text>
         </View>
 
+        {/* -------------------------------- */}
         {/* SERVICE RECORDS */}
+        {/* -------------------------------- */}
 
-        <View style={styles.addServiceHeader}>
-          <Text style={styles.sectionTitle}>
+        <View
+          style={
+            styles.addServiceHeader
+          }
+        >
+          <Text
+            style={
+              styles.sectionTitle
+            }
+          >
             Service Records
           </Text>
 
           <Pressable
-            style={styles.addButton}
+            style={
+              styles.addButton
+            }
             onPress={() => {
               setMessage('');
+
               setShowAddService(
                 !showAddService
               );
             }}
           >
-            <Text style={styles.addButtonText}>
+            <Text
+              style={
+                styles.addButtonText
+              }
+            >
               {showAddService
                 ? 'Close'
                 : '+ Add'}
@@ -497,68 +2027,98 @@ export default function VehicleDetailsScreen() {
         {/* ADD SERVICE FORM */}
 
         {showAddService && (
-          <View style={styles.formCard}>
-            <Text style={styles.formTitle}>
+          <View
+            style={styles.formCard}
+          >
+            <Text
+              style={styles.formTitle}
+            >
               New Service
             </Text>
 
-            <Text style={styles.inputLabel}>
+            <Text
+              style={styles.inputLabel}
+            >
               SERVICE DATE
             </Text>
 
             <TextInput
               value={serviceDate}
-              onChangeText={setServiceDate}
+              onChangeText={
+                setServiceDate
+              }
               placeholder="YYYY-MM-DD"
               placeholderTextColor="#555"
               style={styles.input}
             />
 
-            <Text style={styles.inputLabel}>
+            <Text
+              style={styles.inputLabel}
+            >
               SERVICE KM
             </Text>
 
             <TextInput
               value={serviceKm}
-              onChangeText={setServiceKm}
+              onChangeText={
+                setServiceKm
+              }
               placeholder="e.g. 15000"
               placeholderTextColor="#555"
               keyboardType="numeric"
               style={styles.input}
             />
 
-            <Text style={styles.inputLabel}>
+            <Text
+              style={styles.inputLabel}
+            >
               SERVICE TYPE
             </Text>
 
             <TextInput
               value={serviceType}
-              onChangeText={setServiceType}
+              onChangeText={
+                setServiceType
+              }
               placeholder="e.g. Regular Service"
               placeholderTextColor="#555"
               style={styles.input}
             />
 
-            <Text style={styles.inputLabel}>
+            <Text
+              style={styles.inputLabel}
+            >
               SERVICE COST
             </Text>
 
-            <View style={styles.costInput}>
-              <Text style={styles.rupee}>
+            <View
+              style={
+                styles.costInput
+              }
+            >
+              <Text
+                style={styles.rupee}
+              >
                 ₹
               </Text>
 
               <TextInput
                 value={serviceCost}
-                onChangeText={setServiceCost}
+                onChangeText={
+                  setServiceCost
+                }
                 placeholder="e.g. 4500"
                 placeholderTextColor="#555"
                 keyboardType="decimal-pad"
-                style={styles.costTextInput}
+                style={
+                  styles.costTextInput
+                }
               />
             </View>
 
-            <Text style={styles.inputLabel}>
+            <Text
+              style={styles.inputLabel}
+            >
               NOTES
             </Text>
 
@@ -575,171 +2135,282 @@ export default function VehicleDetailsScreen() {
             />
 
             <Pressable
-              style={styles.saveButton}
-              onPress={saveService}
-              disabled={savingService}
+              style={[
+                styles.saveButton,
+                savingService &&
+                  styles.buttonDisabled,
+              ]}
+              onPress={
+                saveService
+              }
+              disabled={
+                savingService
+              }
             >
               {savingService ? (
                 <ActivityIndicator
                   color="#000000"
                 />
               ) : (
-                <Text style={styles.saveButtonText}>
+                <Text
+                  style={
+                    styles.saveButtonText
+                  }
+                >
                   Save Service
                 </Text>
               )}
             </Pressable>
 
             {message !== '' && (
-              <Text style={styles.message}>
+              <Text
+                style={
+                  styles.message
+                }
+              >
                 {message}
               </Text>
             )}
           </View>
         )}
 
+        {/* -------------------------------- */}
         {/* SERVICE STATS */}
+        {/* -------------------------------- */}
 
-        <View style={styles.statsCard}>
+        <View
+          style={styles.statsCard}
+        >
           <View>
-            <Text style={styles.statsLabel}>
+            <Text
+              style={styles.statsLabel}
+            >
               TOTAL SERVICES
             </Text>
 
-            <Text style={styles.statsValue}>
+            <Text
+              style={styles.statsValue}
+            >
               {services.length}
             </Text>
           </View>
 
-          <View style={styles.statsRight}>
-            <Text style={styles.statsLabel}>
+          <View
+            style={styles.statsRight}
+          >
+            <Text
+              style={styles.statsLabel}
+            >
               TOTAL SPENT
             </Text>
 
-            <Text style={styles.statsValue}>
-              ₹{totalServiceCost.toFixed(0)}
+            <Text
+              style={styles.statsValue}
+            >
+              ₹
+              {totalServiceCost.toFixed(
+                0
+              )}
             </Text>
           </View>
         </View>
 
+        {/* -------------------------------- */}
         {/* SERVICE HISTORY */}
+        {/* -------------------------------- */}
 
         {loadingServices ? (
-          <View style={styles.loadingHistory}>
+          <View
+            style={
+              styles.loadingHistory
+            }
+          >
             <ActivityIndicator
               color="#FFFFFF"
             />
           </View>
-        ) : services.length === 0 ? (
-          <View style={styles.emptyHistory}>
+        ) : services.length ===
+          0 ? (
+          <View
+            style={
+              styles.emptyHistory
+            }
+          >
             <Text
-              style={styles.emptyHistoryTitle}
+              style={
+                styles.emptyHistoryTitle
+              }
             >
               No service history yet
             </Text>
 
             <Text
-              style={styles.emptyHistoryText}
+              style={
+                styles.emptyHistoryText
+              }
             >
-              Your saved services will appear here.
+              Your saved services for{' '}
+              {
+                selectedVehicle.vehicle_name
+              } will appear here.
             </Text>
           </View>
         ) : (
-          services.map((service) => (
-            <View
-              key={service.id}
-              style={styles.historyCard}
-            >
-              <View style={styles.historyTop}>
-                <View>
-                  <Text
-                    style={styles.historyType}
-                  >
-                    {service.service_type}
-                  </Text>
+          services.map(
+            (service) => (
+              <View
+                key={service.id}
+                style={
+                  styles.historyCard
+                }
+              >
+                <View
+                  style={
+                    styles.historyTop
+                  }
+                >
+                  <View>
+                    <Text
+                      style={
+                        styles.historyType
+                      }
+                    >
+                      {
+                        service.service_type
+                      }
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.historyDate
+                      }
+                    >
+                      {
+                        service.service_date
+                      }
+                    </Text>
+                  </View>
 
                   <Text
-                    style={styles.historyDate}
+                    style={
+                      styles.historyCost
+                    }
                   >
-                    {service.service_date}
+                    ₹
+                    {Number(
+                      service.service_cost
+                    ).toFixed(0)}
                   </Text>
                 </View>
 
+                <View
+                  style={
+                    styles.historyDivider
+                  }
+                />
+
                 <Text
-                  style={styles.historyCost}
+                  style={
+                    styles.historyKm
+                  }
                 >
-                  ₹
                   {Number(
-                    service.service_cost
-                  ).toFixed(0)}
+                    service.service_km
+                  ).toLocaleString()}{' '}
+                  km
                 </Text>
+
+                {service.notes && (
+                  <Text
+                    style={
+                      styles.historyNotes
+                    }
+                  >
+                    {service.notes}
+                  </Text>
+                )}
               </View>
-
-              <View
-                style={styles.historyDivider}
-              />
-
-              <Text style={styles.historyKm}>
-                {Number(
-                  service.service_km
-                ).toLocaleString()} km
-              </Text>
-
-              {service.notes && (
-                <Text
-                  style={styles.historyNotes}
-                >
-                  {service.notes}
-                </Text>
-              )}
-            </View>
-          ))
+            )
+          )
         )}
 
+        {/* -------------------------------- */}
         {/* QUICK ACTIONS */}
+        {/* -------------------------------- */}
 
-        <Text style={styles.sectionTitle}>
+        <Text
+          style={styles.sectionTitle}
+        >
           Quick Actions
         </Text>
 
-        <View style={styles.actionRow}>
+        <View
+          style={styles.actionRow}
+        >
           <Pressable
             style={styles.actionCard}
             onPress={() =>
-              router.push('/vehicle/add')
+              router.push(
+                '/vehicle/add'
+              )
             }
           >
-            <Text style={styles.actionIcon}>
+            <Text
+              style={
+                styles.actionIcon
+              }
+            >
               ✎
             </Text>
 
-            <Text style={styles.actionTitle}>
+            <Text
+              style={
+                styles.actionTitle
+              }
+            >
               Update
             </Text>
 
-            <Text style={styles.actionSubtitle}>
+            <Text
+              style={
+                styles.actionSubtitle
+              }
+            >
               Vehicle details
             </Text>
           </Pressable>
 
           <Pressable
             style={styles.actionCard}
-            onPress={() => router.back()}
+            onPress={() =>
+              router.back()
+            }
           >
-            <Text style={styles.actionIcon}>
+            <Text
+              style={
+                styles.actionIcon
+              }
+            >
               ⌂
             </Text>
 
-            <Text style={styles.actionTitle}>
+            <Text
+              style={
+                styles.actionTitle
+              }
+            >
               Home
             </Text>
 
-            <Text style={styles.actionSubtitle}>
+            <Text
+              style={
+                styles.actionSubtitle
+              }
+            >
               Dashboard
             </Text>
           </Pressable>
         </View>
-
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -764,11 +2435,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
 
+  // --------------------------------
+  // HEADER
+  // --------------------------------
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 30,
+    marginBottom: 25,
   },
 
   backCircle: {
@@ -799,56 +2474,107 @@ const styles = StyleSheet.create({
     width: 42,
   },
 
+  // --------------------------------
+  // HERO
+  // --------------------------------
+
   heroCard: {
-    backgroundColor: '#111111',
+    height: 350,
     borderRadius: 28,
-    padding: 28,
+    backgroundColor: '#111111',
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#292929',
-    minHeight: 250,
-    justifyContent: 'center',
+  },
+
+  heroImage: {
+    flex: 1,
+  },
+
+  heroImageStyle: {
+    resizeMode: 'cover',
+  },
+
+  heroOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor:
+      'rgba(0,0,0,0.42)',
+  },
+
+  heroContent: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    padding: 25,
+  },
+
+  heroFallback: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    padding: 28,
   },
 
   smallLabel: {
-    color: '#777777',
-    fontSize: 12,
+    color: '#D0D0D0',
+    fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 4,
+    letterSpacing: 3,
   },
 
   vehicleName: {
     color: '#FFFFFF',
-    fontSize: 32,
+    fontSize: 31,
     fontWeight: '900',
-    marginTop: 12,
-    textTransform: 'uppercase',
+    marginTop: 8,
+    textShadowColor:
+      'rgba(0,0,0,0.8)',
+    textShadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    textShadowRadius: 4,
+  },
+
+  variantText: {
+    color: '#D0D0D0',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 5,
   },
 
   registration: {
-    color: '#777777',
-    fontSize: 17,
-    marginTop: 6,
+    color: '#D0D0D0',
+    fontSize: 15,
+    marginTop: 5,
   },
 
   heroDivider: {
     height: 1,
-    backgroundColor: '#292929',
-    marginVertical: 25,
+    backgroundColor:
+      'rgba(255,255,255,0.18)',
+    marginVertical: 20,
   },
 
   kmNumber: {
     color: '#FFFFFF',
-    fontSize: 48,
+    fontSize: 44,
     fontWeight: '900',
   },
 
   kmLabel: {
-    color: '#666666',
-    fontSize: 11,
+    color: '#D0D0D0',
+    fontSize: 9,
     fontWeight: '700',
-    letterSpacing: 4,
-    marginTop: 2,
+    letterSpacing: 3,
+    marginTop: 1,
   },
+
+  // --------------------------------
+  // SECTION
+  // --------------------------------
 
   sectionTitle: {
     color: '#FFFFFF',
@@ -858,13 +2584,19 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
+  // --------------------------------
+  // BASIC INFO
+  // --------------------------------
+
   infoGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
   },
 
   infoCard: {
     flex: 1,
+    minWidth: '46%',
     backgroundColor: '#111111',
     borderRadius: 20,
     padding: 20,
@@ -876,17 +2608,102 @@ const styles = StyleSheet.create({
 
   infoLabel: {
     color: '#666666',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     letterSpacing: 2,
   },
 
   infoValue: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
     marginTop: 8,
   },
+
+  // --------------------------------
+  // SPECIFICATIONS
+  // --------------------------------
+
+  specSection: {
+    marginBottom: 3,
+  },
+
+  specSectionTitle: {
+    color: '#666666',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 2,
+    marginBottom: 10,
+  },
+
+  specGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+
+  specCard: {
+    width: '48%',
+    backgroundColor: '#111111',
+    borderRadius: 18,
+    padding: 17,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#292929',
+    minHeight: 90,
+    justifyContent: 'center',
+  },
+
+  specWideCard: {
+    width: '100%',
+    backgroundColor: '#111111',
+    borderRadius: 18,
+    padding: 17,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#292929',
+    minHeight: 90,
+    justifyContent: 'center',
+  },
+
+  specLabel: {
+    color: '#666666',
+    fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+  },
+
+  specValue: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
+    marginTop: 6,
+  },
+
+  noSpecsCard: {
+    backgroundColor: '#0D0D0D',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#222222',
+  },
+
+  noSpecsTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+
+  noSpecsText: {
+    color: '#666666',
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 7,
+  },
+
+  // --------------------------------
+  // SERVICE
+  // --------------------------------
 
   sectionHeader: {
     flexDirection: 'row',
@@ -993,6 +2810,10 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
 
+  // --------------------------------
+  // SERVICE RECORDS
+  // --------------------------------
+
   addServiceHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1012,6 +2833,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
+
+  // --------------------------------
+  // SERVICE FORM
+  // --------------------------------
 
   formCard: {
     backgroundColor: '#111111',
@@ -1088,6 +2913,10 @@ const styles = StyleSheet.create({
     marginTop: 22,
   },
 
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+
   saveButtonText: {
     color: '#000000',
     fontSize: 16,
@@ -1101,6 +2930,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 14,
   },
+
+  // --------------------------------
+  // SERVICE STATS
+  // --------------------------------
 
   statsCard: {
     backgroundColor: '#111111',
@@ -1211,6 +3044,10 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
 
+  // --------------------------------
+  // QUICK ACTIONS
+  // --------------------------------
+
   actionRow: {
     flexDirection: 'row',
     gap: 12,
@@ -1242,6 +3079,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 5,
   },
+
+  // --------------------------------
+  // EMPTY
+  // --------------------------------
 
   empty: {
     flex: 1,

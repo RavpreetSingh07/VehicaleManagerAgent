@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -12,20 +12,12 @@ import {
   View,
 } from 'react-native';
 
-import { supabase } from '../../lib/supabase';
+import {
+  useVehicle,
+  Vehicle,
+} from '@/context/VehicleContext';
 
-type Vehicle = {
-  id: string;
-  vehicle_model_id: string | null;
-  vehicle_name: string;
-  registration_number: string;
-  registration_date: string | null;
-  current_km: number | null;
-  last_service_date: string | null;
-  last_service_km: number | null;
-  custom_image_path: string | null;
-  created_at: string;
-};
+import { supabase } from '@/lib/supabase';
 
 type FuelEntry = {
   id: string;
@@ -47,9 +39,17 @@ type ServiceEntry = {
 };
 
 export default function HomeScreen() {
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [selectedVehicle, setSelectedVehicle] =
-    useState<Vehicle | null>(null);
+  // --------------------------------
+  // GLOBAL VEHICLE CONTEXT
+  // --------------------------------
+
+  const {
+    vehicles,
+    selectedVehicle,
+    switchVehicle,
+    loadingVehicles,
+    refreshVehicles,
+  } = useVehicle();
 
   const [fuelEntries, setFuelEntries] =
     useState<FuelEntry[]>([]);
@@ -60,7 +60,8 @@ export default function HomeScreen() {
   const [vehicleImage, setVehicleImage] =
     useState<string | null>(null);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] =
+    useState(true);
 
   // --------------------------------
   // TIME BASED GREETING
@@ -93,7 +94,6 @@ export default function HomeScreen() {
   ) => {
     try {
       // CUSTOM IMAGE FIRST
-
       if (vehicle.custom_image_path) {
         const {
           data: customImage,
@@ -107,12 +107,12 @@ export default function HomeScreen() {
           setVehicleImage(
             customImage.publicUrl
           );
+
           return;
         }
       }
 
       // DEFAULT VEHICLE MODEL IMAGE
-
       if (!vehicle.vehicle_model_id) {
         setVehicleImage(null);
         return;
@@ -182,74 +182,80 @@ export default function HomeScreen() {
   const loadVehicleData = async (
     vehicle: Vehicle
   ) => {
-    setSelectedVehicle(vehicle);
+    try {
+      // Clear old image immediately
+      setVehicleImage(null);
 
-    // Clear old image immediately
-    setVehicleImage(null);
+      // Load image
+      await loadVehicleImage(vehicle);
 
-    await loadVehicleImage(vehicle);
+      // --------------------------------
+      // FUEL FOR SELECTED VEHICLE ONLY
+      // --------------------------------
 
-    // --------------------------------
-    // FUEL FOR THIS VEHICLE ONLY
-    // --------------------------------
+      const {
+        data: fuelData,
+        error: fuelError,
+      } = await supabase
+        .from('fuel_entries')
+        .select(
+          'id, vehicle_id, fuel_litres, fuel_cost, distance_km, mileage, created_at'
+        )
+        .eq(
+          'vehicle_id',
+          vehicle.id
+        )
+        .order('created_at', {
+          ascending: false,
+        });
 
-    const {
-      data: fuelData,
-      error: fuelError,
-    } = await supabase
-      .from('fuel_entries')
-      .select(
-        'id, vehicle_id, fuel_litres, fuel_cost, distance_km, mileage, created_at'
-      )
-      .eq(
-        'vehicle_id',
-        vehicle.id
-      )
-      .order('created_at', {
-        ascending: false,
-      });
+      if (fuelError) {
+        console.log(
+          'Fuel loading error:',
+          fuelError.message
+        );
+      }
 
-    if (fuelError) {
+      setFuelEntries(
+        (fuelData || []) as FuelEntry[]
+      );
+
+      // --------------------------------
+      // SERVICE FOR SELECTED VEHICLE ONLY
+      // --------------------------------
+
+      const {
+        data: serviceData,
+        error: serviceError,
+      } = await supabase
+        .from('service_entries')
+        .select(
+          'id, vehicle_id, service_date, service_km, service_type, service_cost'
+        )
+        .eq(
+          'vehicle_id',
+          vehicle.id
+        )
+        .order('service_date', {
+          ascending: false,
+        });
+
+      if (serviceError) {
+        console.log(
+          'Service loading error:',
+          serviceError.message
+        );
+      }
+
+      setServiceEntries(
+        (serviceData || []) as ServiceEntry[]
+      );
+    } catch (error) {
       console.log(
-        'Fuel loading error:',
-        fuelError.message
+        'Vehicle data loading error:',
+        error
       );
     }
-
-    setFuelEntries(
-      (fuelData || []) as FuelEntry[]
-    );
-
-    // --------------------------------
-    // SERVICE FOR THIS VEHICLE ONLY
-    // --------------------------------
-
-    const {
-      data: serviceData,
-      error: serviceError,
-    } = await supabase
-      .from('service_entries')
-      .select(
-        'id, vehicle_id, service_date, service_km, service_type, service_cost'
-      )
-      .eq(
-        'vehicle_id',
-        vehicle.id
-      )
-      .order('service_date', {
-        ascending: false,
-      });
-
-    if (serviceError) {
-      console.log(
-        'Service loading error:',
-        serviceError.message
-      );
-    }
-
-    setServiceEntries(
-      (serviceData || []) as ServiceEntry[]
-    );
   };
 
   // --------------------------------
@@ -269,81 +275,73 @@ export default function HomeScreen() {
         return;
       }
 
-      // LOAD ALL VEHICLES
+      // Refresh vehicle list
+      await refreshVehicles();
 
-      const {
-        data: vehicleData,
-        error: vehicleError,
-      } = await supabase
-        .from('vehicles')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', {
-          ascending: false,
-        });
-
-      if (vehicleError) {
-        console.log(
-          'Vehicle loading error:',
-          vehicleError.message
+      // IMPORTANT:
+      // Reload fuel + service data whenever
+      // Home screen gets focus.
+      //
+      // This fixes the problem where the Fuel tab
+      // has data but Home still shows "No data".
+      if (selectedVehicle) {
+        await loadVehicleData(
+          selectedVehicle
         );
       }
-
-      const loadedVehicles =
-        (vehicleData || []) as Vehicle[];
-
-      setVehicles(loadedVehicles);
-
-      // NO VEHICLES
-
-      if (loadedVehicles.length === 0) {
-        setSelectedVehicle(null);
-        setFuelEntries([]);
-        setServiceEntries([]);
-        setVehicleImage(null);
-        setLoading(false);
-        return;
-      }
-
-      // SELECT NEWEST VEHICLE BY DEFAULT
-
-      const firstVehicle =
-        loadedVehicles[0];
-
-      await loadVehicleData(
-        firstVehicle
-      );
     } catch (error) {
       console.log(
         'Dashboard error:',
         error
       );
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
+
+  // --------------------------------
+  // REFRESH WHEN HOME GETS FOCUS
+  // --------------------------------
 
   useFocusEffect(
     useCallback(() => {
       loadDashboard();
-    }, [])
+    }, [selectedVehicle?.id])
   );
 
   // --------------------------------
-  // SWITCH VEHICLE
+  // LOAD DATA WHEN VEHICLE CHANGES
   // --------------------------------
 
-  const switchVehicle = async (
-    vehicle: Vehicle
-  ) => {
-    if (
-      selectedVehicle?.id === vehicle.id
-    ) {
-      return;
+  useEffect(() => {
+    if (selectedVehicle) {
+      loadVehicleData(
+        selectedVehicle
+      );
+    } else {
+      setFuelEntries([]);
+      setServiceEntries([]);
+      setVehicleImage(null);
     }
+  }, [selectedVehicle?.id]);
 
-    await loadVehicleData(vehicle);
-  };
+  // --------------------------------
+  // LOADING
+  // --------------------------------
+
+  if (
+    loading ||
+    loadingVehicles
+  ) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator
+          size="large"
+          color="#FFFFFF"
+        />
+      </View>
+    );
+  }
 
   // --------------------------------
   // FUEL CALCULATIONS
@@ -435,35 +433,17 @@ export default function HomeScreen() {
       : 0;
 
   // --------------------------------
-  // LOADING
-  // --------------------------------
-
-  if (loading) {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator
-          size="large"
-          color="#FFFFFF"
-        />
-      </View>
-    );
-  }
-
-  // --------------------------------
   // SCREEN
   // --------------------------------
 
   return (
     <View style={styles.container}>
       <ScrollView
-        showsVerticalScrollIndicator={
-          false
-        }
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={
           styles.scrollContent
         }
       >
-
         {/* HEADER */}
 
         <View style={styles.header}>
@@ -492,12 +472,11 @@ export default function HomeScreen() {
           style={styles.welcomeText}
         >
           Everything about your vehicle,
-          {'\n'}in one place.
+          {'\n'}
+          in one place.
         </Text>
 
-        {/* -------------------------------- */}
         {/* VEHICLE SWITCHER */}
-        {/* -------------------------------- */}
 
         {vehicles.length > 1 && (
           <>
@@ -603,9 +582,7 @@ export default function HomeScreen() {
           </>
         )}
 
-        {/* -------------------------------- */}
         {/* VEHICLE CARD */}
-        {/* -------------------------------- */}
 
         {selectedVehicle ? (
           <Pressable
@@ -616,9 +593,6 @@ export default function HomeScreen() {
               )
             }
           >
-
-            {/* CAR IMAGE */}
-
             {vehicleImage ? (
               <ImageBackground
                 source={{
@@ -645,13 +619,9 @@ export default function HomeScreen() {
               />
             )}
 
-            {/* DARK GLOW */}
-
             <View
               style={styles.vehicleGlow}
             />
-
-            {/* VEHICLE TOP */}
 
             <View
               style={
@@ -699,15 +669,11 @@ export default function HomeScreen() {
                   styles.arrowCircle
                 }
               >
-                <Text
-                  style={styles.arrow}
-                >
+                <Text style={styles.arrow}>
                   ›
                 </Text>
               </View>
             </View>
-
-            {/* VEHICLE BOTTOM */}
 
             <View
               style={
@@ -761,17 +727,13 @@ export default function HomeScreen() {
             }
           >
             <Text
-              style={
-                styles.emptyIcon
-              }
+              style={styles.emptyIcon}
             >
               ＋
             </Text>
 
             <Text
-              style={
-                styles.emptyTitle
-              }
+              style={styles.emptyTitle}
             >
               Add your vehicle
             </Text>
@@ -785,9 +747,7 @@ export default function HomeScreen() {
           </Pressable>
         )}
 
-        {/* -------------------------------- */}
         {/* VEHICLE OVERVIEW */}
-        {/* -------------------------------- */}
 
         {selectedVehicle && (
           <>
@@ -813,10 +773,7 @@ export default function HomeScreen() {
               </Text>
             </View>
 
-            <View
-              style={styles.grid}
-            >
-
+            <View style={styles.grid}>
               {/* SERVICE */}
 
               <Pressable
@@ -854,8 +811,7 @@ export default function HomeScreen() {
                     styles.infoValue
                   }
                 >
-                  {nextServiceKm >
-                  0
+                  {nextServiceKm > 0
                     ? `${remainingServiceKm.toLocaleString()} km`
                     : 'Not set'}
                 </Text>
@@ -865,8 +821,7 @@ export default function HomeScreen() {
                     styles.infoSub
                   }
                 >
-                  {nextServiceKm >
-                  0
+                  {nextServiceKm > 0
                     ? 'until next service'
                     : 'Add service record'}
                 </Text>
@@ -909,8 +864,7 @@ export default function HomeScreen() {
                     styles.infoValue
                   }
                 >
-                  {averageMileage >
-                  0
+                  {averageMileage > 0
                     ? `${averageMileage.toFixed(2)} km/L`
                     : 'No data'}
                 </Text>
@@ -1010,8 +964,7 @@ export default function HomeScreen() {
                     styles.infoValue
                   }
                 >
-                  {totalExpense >
-                  0
+                  {totalExpense > 0
                     ? `₹${totalExpense.toLocaleString(
                         'en-IN'
                       )}`
@@ -1028,9 +981,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
 
-            {/* -------------------------------- */}
             {/* SMART TRACKING */}
-            {/* -------------------------------- */}
 
             <View
               style={
@@ -1051,7 +1002,8 @@ export default function HomeScreen() {
                 }
               >
                 Your vehicle data,
-                {'\n'}turned into insights.
+                {'\n'}
+                turned into insights.
               </Text>
 
               <View
@@ -1099,8 +1051,7 @@ export default function HomeScreen() {
                       styles.calculationNumber
                     }
                   >
-                    {averageMileage >
-                    0
+                    {averageMileage > 0
                       ? averageMileage.toFixed(
                           1
                         )
@@ -1132,8 +1083,7 @@ export default function HomeScreen() {
                       styles.calculationNumber
                     }
                   >
-                    {totalExpense >
-                    0
+                    {totalExpense > 0
                       ? `₹${(
                           totalExpense /
                           1000
@@ -1152,9 +1102,7 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            {/* -------------------------------- */}
             {/* RECENT ACTIVITY */}
-            {/* -------------------------------- */}
 
             <View
               style={
@@ -1248,9 +1196,7 @@ export default function HomeScreen() {
               </View>
             )}
 
-            {/* -------------------------------- */}
             {/* QUICK ACTION */}
-            {/* -------------------------------- */}
 
             <Text
               style={
@@ -1316,23 +1262,29 @@ export default function HomeScreen() {
         )}
       </ScrollView>
 
-      {/* -------------------------------- */}
       {/* FLOATING VMA AI BUTTON */}
-      {/* -------------------------------- */}
 
       <Pressable
-        style={styles.aiFloatingButton}
-        onPress={() => router.push('/ai')}
+        style={
+          styles.aiFloatingButton
+        }
+        onPress={() =>
+          router.push('/ai')
+        }
       >
         <Text
-          style={styles.aiFloatingIcon}
+          style={
+            styles.aiFloatingIcon
+          }
         >
           ✦
         </Text>
 
         <View>
           <Text
-            style={styles.aiFloatingTitle}
+            style={
+              styles.aiFloatingTitle
+            }
           >
             VMA AI
           </Text>

@@ -14,10 +14,12 @@ import {
   View,
 } from 'react-native';
 
-import { supabase } from '../../lib/supabase';
+import { useVehicle } from '@/context/VehicleContext';
+import { supabase } from '@/lib/supabase';
 
 type DocumentEntry = {
   id: string;
+  vehicle_id: string;
   document_type: string;
   document_number: string | null;
   issue_date: string | null;
@@ -26,23 +28,53 @@ type DocumentEntry = {
   created_at: string;
 };
 
-const DOCUMENT_TYPES = ['RC', 'Insurance', 'PUC'];
+const DOCUMENT_TYPES = [
+  'RC',
+  'Insurance',
+  'PUC',
+];
 
 export default function DocumentsScreen() {
-  const [documents, setDocuments] = useState<DocumentEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  // --------------------------------
+  // GLOBAL SELECTED VEHICLE
+  // --------------------------------
 
-  const [showAdd, setShowAdd] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const {
+    selectedVehicle,
+    selectedVehicleId,
+  } = useVehicle();
 
-  const [documentType, setDocumentType] = useState('RC');
-  const [documentNumber, setDocumentNumber] = useState('');
-  const [issueDate, setIssueDate] = useState('');
-  const [expiryDate, setExpiryDate] = useState('');
+  const [documents, setDocuments] =
+    useState<DocumentEntry[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [showAdd, setShowAdd] =
+    useState(false);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [message, setMessage] =
+    useState('');
+
+  const [documentType, setDocumentType] =
+    useState('RC');
+
+  const [documentNumber, setDocumentNumber] =
+    useState('');
+
+  const [issueDate, setIssueDate] =
+    useState('');
+
+  const [expiryDate, setExpiryDate] =
+    useState('');
 
   const [selectedFile, setSelectedFile] =
-    useState<DocumentPicker.DocumentPickerAsset | null>(null);
+    useState<DocumentPicker.DocumentPickerAsset | null>(
+      null
+    );
 
   // --------------------------------
   // LOAD DOCUMENTS
@@ -52,6 +84,12 @@ export default function DocumentsScreen() {
     setLoading(true);
 
     try {
+      // No selected vehicle = no documents.
+      if (!selectedVehicleId) {
+        setDocuments([]);
+        return;
+      }
+
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -61,14 +99,25 @@ export default function DocumentsScreen() {
         return;
       }
 
-      const { data, error } = await supabase
+      const {
+        data,
+        error,
+      } = await supabase
         .from('vehicle_documents')
         .select(
-          'id, document_type, document_number, issue_date, expiry_date, document_url, created_at'
+          'id, vehicle_id, document_type, document_number, issue_date, expiry_date, document_url, created_at'
         )
-        .eq('user_id', user.id)
+        .eq(
+          'user_id',
+          user.id
+        )
+        .eq(
+          'vehicle_id',
+          selectedVehicleId
+        )
         .order('expiry_date', {
           ascending: true,
+          nullsFirst: false,
         });
 
       if (error) {
@@ -76,24 +125,36 @@ export default function DocumentsScreen() {
           'Documents loading error:',
           error.message
         );
-      } else {
-        setDocuments(
-          (data || []) as DocumentEntry[]
-        );
+
+        setDocuments([]);
+        return;
       }
+
+      setDocuments(
+        (data || []) as DocumentEntry[]
+      );
     } catch (error) {
       console.log(
         'Documents error:',
         error
       );
-    }
 
-    setLoading(false);
+      setDocuments([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
+  // --------------------------------
+  // RELOAD WHEN VEHICLE CHANGES
+  // --------------------------------
+
   useEffect(() => {
+    setMessage('');
+    setDocuments([]);
+
     loadDocuments();
-  }, []);
+  }, [selectedVehicleId]);
 
   // --------------------------------
   // PICK DOCUMENT
@@ -157,7 +218,8 @@ export default function DocumentsScreen() {
     );
 
     const difference =
-      expiry.getTime() - today.getTime();
+      expiry.getTime() -
+      today.getTime();
 
     const daysLeft = Math.ceil(
       difference /
@@ -191,7 +253,10 @@ export default function DocumentsScreen() {
   const saveDocument = async () => {
     setMessage('');
 
-    if (!documentType || !expiryDate) {
+    if (
+      !documentType ||
+      !expiryDate
+    ) {
       setMessage(
         'Please select a document type and expiry date.'
       );
@@ -201,6 +266,13 @@ export default function DocumentsScreen() {
     if (!selectedFile) {
       setMessage(
         'Please select an image or PDF.'
+      );
+      return;
+    }
+
+    if (!selectedVehicleId) {
+      setMessage(
+        'Please select a vehicle first.'
       );
       return;
     }
@@ -216,41 +288,15 @@ export default function DocumentsScreen() {
         setMessage(
           'Please log in again.'
         );
-        setSaving(false);
         return;
       }
 
       // --------------------------------
-      // GET VEHICLE
+      // USE SELECTED VEHICLE
       // --------------------------------
 
-      const {
-        data: vehicle,
-        error: vehicleError,
-      } = await supabase
-        .from('vehicles')
-        .select('id')
-        .eq('user_id', user.id)
-        .order('created_at', {
-          ascending: false,
-        })
-        .limit(1)
-        .maybeSingle();
-
-      if (vehicleError) {
-        console.log(
-          'Vehicle error:',
-          vehicleError.message
-        );
-      }
-
-      if (vehicleError || !vehicle) {
-        setMessage(
-          'No vehicle found.'
-        );
-        setSaving(false);
-        return;
-      }
+      const vehicleId =
+        selectedVehicleId;
 
       // --------------------------------
       // READ FILE
@@ -288,10 +334,10 @@ export default function DocumentsScreen() {
         );
 
       const filePath =
-        `${user.id}/${vehicle.id}/${Date.now()}_${safeDocumentType}_${safeFileName}`;
+        `${user.id}/${vehicleId}/${Date.now()}_${safeDocumentType}_${safeFileName}`;
 
       console.log(
-        'Uploading:',
+        'Uploading document:',
         filePath
       );
 
@@ -324,7 +370,6 @@ export default function DocumentsScreen() {
           `Upload failed: ${uploadError.message}`
         );
 
-        setSaving(false);
         return;
       }
 
@@ -342,15 +387,26 @@ export default function DocumentsScreen() {
       } = await supabase
         .from('vehicle_documents')
         .insert({
-          vehicle_id: vehicle.id,
-          user_id: user.id,
-          document_type: documentType,
+          vehicle_id:
+            vehicleId,
+
+          user_id:
+            user.id,
+
+          document_type:
+            documentType,
+
           document_number:
             documentNumber || null,
+
           issue_date:
             issueDate || null,
-          expiry_date: expiryDate,
-          document_url: filePath,
+
+          expiry_date:
+            expiryDate,
+
+          document_url:
+            filePath,
         });
 
       if (databaseError) {
@@ -359,16 +415,18 @@ export default function DocumentsScreen() {
           databaseError.message
         );
 
-        // Remove uploaded file if DB save fails
+        // Remove uploaded file if
+        // database insert failed.
         await supabase.storage
           .from('vehicle-documents')
-          .remove([filePath]);
+          .remove([
+            filePath,
+          ]);
 
         setMessage(
           `Save failed: ${databaseError.message}`
         );
 
-        setSaving(false);
         return;
       }
 
@@ -398,9 +456,9 @@ export default function DocumentsScreen() {
       setMessage(
         'Something went wrong while saving.'
       );
+    } finally {
+      setSaving(false);
     }
-
-    setSaving(false);
   };
 
   // --------------------------------
@@ -416,6 +474,7 @@ export default function DocumentsScreen() {
         'No document',
         'No file has been uploaded for this document.'
       );
+
       return;
     }
 
@@ -426,10 +485,13 @@ export default function DocumentsScreen() {
     router.push({
       pathname:
         '/vehicle/document-viewer',
+
       params: {
         path: filePath,
-        type: documentType || '',
-        name: fileName,
+        type:
+          documentType || '',
+        name:
+          fileName,
       },
     });
   };
@@ -449,22 +511,38 @@ export default function DocumentsScreen() {
           text: 'Cancel',
           style: 'cancel',
         },
+
         {
           text: 'Delete',
           style: 'destructive',
+
           onPress: async () => {
             setMessage('');
 
             try {
               const {
                 data: { user },
-              } = await supabase.auth.getUser();
+              } =
+                await supabase.auth.getUser();
 
               if (!user) {
                 Alert.alert(
                   'Session expired',
                   'Please log in again.'
                 );
+
+                return;
+              }
+
+              if (
+                document.vehicle_id !==
+                selectedVehicleId
+              ) {
+                Alert.alert(
+                  'Wrong vehicle',
+                  'This document does not belong to the currently selected vehicle.'
+                );
+
                 return;
               }
 
@@ -472,14 +550,20 @@ export default function DocumentsScreen() {
               // DELETE STORAGE FILE
               // --------------------------------
 
-              if (document.document_url) {
+              if (
+                document.document_url
+              ) {
                 const {
-                  error: storageError,
-                } = await supabase.storage
-                  .from('vehicle-documents')
-                  .remove([
-                    document.document_url,
-                  ]);
+                  error:
+                    storageError,
+                } =
+                  await supabase.storage
+                    .from(
+                      'vehicle-documents'
+                    )
+                    .remove([
+                      document.document_url,
+                    ]);
 
                 if (storageError) {
                   console.log(
@@ -500,13 +584,34 @@ export default function DocumentsScreen() {
               // DELETE DATABASE RECORD
               // --------------------------------
 
+              let query =
+                supabase
+                  .from(
+                    'vehicle_documents'
+                  )
+                  .delete()
+                  .eq(
+                    'id',
+                    document.id
+                  )
+                  .eq(
+                    'user_id',
+                    user.id
+                  );
+
+              if (
+                selectedVehicleId
+              ) {
+                query = query.eq(
+                  'vehicle_id',
+                  selectedVehicleId
+                );
+              }
+
               const {
-                error: databaseError,
-              } = await supabase
-                .from('vehicle_documents')
-                .delete()
-                .eq('id', document.id)
-                .eq('user_id', user.id);
+                error:
+                  databaseError,
+              } = await query;
 
               if (databaseError) {
                 console.log(
@@ -526,11 +631,13 @@ export default function DocumentsScreen() {
               // UPDATE SCREEN
               // --------------------------------
 
-              setDocuments((current) =>
-                current.filter(
-                  (item) =>
-                    item.id !== document.id
-                )
+              setDocuments(
+                (current) =>
+                  current.filter(
+                    (item) =>
+                      item.id !==
+                      document.id
+                  )
               );
 
               Alert.alert(
@@ -569,6 +676,10 @@ export default function DocumentsScreen() {
     );
   }
 
+  // --------------------------------
+  // SCREEN
+  // --------------------------------
+
   return (
     <KeyboardAvoidingView
       style={styles.screen}
@@ -582,7 +693,9 @@ export default function DocumentsScreen() {
         contentContainerStyle={
           styles.content
         }
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={
+          false
+        }
         keyboardShouldPersistTaps="handled"
       >
 
@@ -591,19 +704,29 @@ export default function DocumentsScreen() {
         <View style={styles.header}>
           <Pressable
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() =>
+              router.back()
+            }
           >
-            <Text style={styles.backArrow}>
+            <Text
+              style={styles.backArrow}
+            >
               ‹
             </Text>
           </Pressable>
 
-          <Text style={styles.headerTitle}>
+          <Text
+            style={
+              styles.headerTitle
+            }
+          >
             Documents
           </Text>
 
           <View
-            style={styles.headerSpacer}
+            style={
+              styles.headerSpacer
+            }
           />
         </View>
 
@@ -613,34 +736,118 @@ export default function DocumentsScreen() {
           Vehicle Documents
         </Text>
 
-        <Text style={styles.subtitle}>
+        <Text
+          style={styles.subtitle}
+        >
           Keep your RC, insurance and PUC
           information organized in one place.
         </Text>
 
+        {/* SELECTED VEHICLE */}
+
+        {selectedVehicle ? (
+          <View
+            style={
+              styles.selectedVehicleCard
+            }
+          >
+            <View>
+              <Text
+                style={
+                  styles.selectedVehicleLabel
+                }
+              >
+                TRACKING VEHICLE
+              </Text>
+
+              <Text
+                style={
+                  styles.selectedVehicleName
+                }
+              >
+                {
+                  selectedVehicle.vehicle_name
+                }
+              </Text>
+
+              <Text
+                style={
+                  styles.selectedVehicleRegistration
+                }
+              >
+                {
+                  selectedVehicle.registration_number
+                }
+              </Text>
+            </View>
+
+            <Text
+              style={
+                styles.selectedVehicleCheck
+              }
+            >
+              ✓
+            </Text>
+          </View>
+        ) : (
+          <View
+            style={
+              styles.selectedVehicleCard
+            }
+          >
+            <Text
+              style={
+                styles.selectedVehicleName
+              }
+            >
+              No vehicle selected
+            </Text>
+          </View>
+        )}
+
         {/* SUMMARY */}
 
-        <View style={styles.summaryCard}>
+        <View
+          style={styles.summaryCard}
+        >
           <View>
-            <Text style={styles.summaryLabel}>
+            <Text
+              style={
+                styles.summaryLabel
+              }
+            >
               DOCUMENTS
             </Text>
 
-            <Text style={styles.summaryValue}>
+            <Text
+              style={
+                styles.summaryValue
+              }
+            >
               {documents.length}
             </Text>
           </View>
 
           <View
-            style={styles.summaryDivider}
+            style={
+              styles.summaryDivider
+            }
           />
 
           <View>
-            <Text style={styles.summaryLabel}>
+            <Text
+              style={
+                styles.summaryLabel
+              }
+            >
               ATTENTION
             </Text>
 
-            <Text style={styles.summaryValue}>
+            <Text
+              style={
+                styles.summaryValue
+              }
+            >
               {
                 documents.filter(
                   (doc) => {
@@ -669,7 +876,10 @@ export default function DocumentsScreen() {
           style={styles.addButton}
           onPress={() => {
             setMessage('');
-            setShowAdd(!showAdd);
+
+            setShowAdd(
+              !showAdd
+            );
           }}
         >
           <Text
@@ -685,24 +895,35 @@ export default function DocumentsScreen() {
           <Text
             style={styles.addArrow}
           >
-            {showAdd ? '×' : '→'}
+            {showAdd
+              ? '×'
+              : '→'}
           </Text>
         </Pressable>
 
         {/* ADD FORM */}
 
         {showAdd && (
-          <View style={styles.formCard}>
-
-            <Text style={styles.formTitle}>
+          <View
+            style={styles.formCard}
+          >
+            <Text
+              style={styles.formTitle}
+            >
               New Document
             </Text>
 
-            <Text style={styles.inputLabel}>
+            {/* TYPE */}
+
+            <Text
+              style={styles.inputLabel}
+            >
               DOCUMENT TYPE
             </Text>
 
-            <View style={styles.typeRow}>
+            <View
+              style={styles.typeRow}
+            >
               {DOCUMENT_TYPES.map(
                 (type) => (
                   <Pressable
@@ -734,12 +955,18 @@ export default function DocumentsScreen() {
               )}
             </View>
 
-            <Text style={styles.inputLabel}>
+            {/* NUMBER */}
+
+            <Text
+              style={styles.inputLabel}
+            >
               DOCUMENT NUMBER
             </Text>
 
             <TextInput
-              value={documentNumber}
+              value={
+                documentNumber
+              }
               onChangeText={
                 setDocumentNumber
               }
@@ -749,7 +976,11 @@ export default function DocumentsScreen() {
               autoCapitalize="characters"
             />
 
-            <Text style={styles.inputLabel}>
+            {/* ISSUE DATE */}
+
+            <Text
+              style={styles.inputLabel}
+            >
               ISSUE DATE
             </Text>
 
@@ -763,7 +994,11 @@ export default function DocumentsScreen() {
               style={styles.input}
             />
 
-            <Text style={styles.inputLabel}>
+            {/* EXPIRY DATE */}
+
+            <Text
+              style={styles.inputLabel}
+            >
               EXPIRY DATE
             </Text>
 
@@ -777,15 +1012,19 @@ export default function DocumentsScreen() {
               style={styles.input}
             />
 
-            {/* FILE PICKER */}
+            {/* FILE */}
 
-            <Text style={styles.inputLabel}>
+            <Text
+              style={styles.inputLabel}
+            >
               DOCUMENT FILE
             </Text>
 
             <Pressable
               style={styles.fileButton}
-              onPress={pickDocument}
+              onPress={
+                pickDocument
+              }
             >
               <Text
                 style={styles.fileIcon}
@@ -797,7 +1036,9 @@ export default function DocumentsScreen() {
                 style={styles.fileInfo}
               >
                 <Text
-                  style={styles.fileTitle}
+                  style={
+                    styles.fileTitle
+                  }
                 >
                   {selectedFile
                     ? 'File selected'
@@ -805,7 +1046,9 @@ export default function DocumentsScreen() {
                 </Text>
 
                 <Text
-                  style={styles.fileSubtitle}
+                  style={
+                    styles.fileSubtitle
+                  }
                   numberOfLines={1}
                 >
                   {selectedFile
@@ -824,9 +1067,18 @@ export default function DocumentsScreen() {
             {/* SAVE */}
 
             <Pressable
-              style={styles.saveButton}
-              onPress={saveDocument}
-              disabled={saving}
+              style={[
+                styles.saveButton,
+                saving &&
+                  styles.buttonDisabled,
+              ]}
+              onPress={
+                saveDocument
+              }
+              disabled={
+                saving ||
+                !selectedVehicleId
+              }
             >
               {saving ? (
                 <ActivityIndicator
@@ -834,9 +1086,13 @@ export default function DocumentsScreen() {
                 />
               ) : (
                 <Text
-                  style={styles.saveText}
+                  style={
+                    styles.saveText
+                  }
                 >
-                  Upload & Save
+                  {selectedVehicleId
+                    ? 'Upload & Save'
+                    : 'Select a Vehicle First'}
                 </Text>
               )}
             </Pressable>
@@ -848,56 +1104,63 @@ export default function DocumentsScreen() {
                 {message}
               </Text>
             )}
-
           </View>
         )}
 
         {/* DOCUMENT LIST */}
 
-        <View style={styles.listHeader}>
+        <View
+          style={styles.listHeader}
+        >
           <Text
             style={styles.sectionTitle}
           >
             Your Documents
           </Text>
 
-          {documents.length > 0 && (
-            <Text style={styles.count}>
+          {documents.length >
+            0 && (
+            <Text
+              style={styles.count}
+            >
               {documents.length}
             </Text>
           )}
         </View>
 
-        {documents.length === 0 ? (
-
-          <View style={styles.emptyCard}>
-
+        {documents.length ===
+        0 ? (
+          <View
+            style={styles.emptyCard}
+          >
             <Text
-              style={styles.emptyIcon}
+              style={
+                styles.emptyIcon
+              }
             >
               📄
             </Text>
 
             <Text
-              style={styles.emptyTitle}
+              style={
+                styles.emptyTitle
+              }
             >
               No documents yet
             </Text>
 
             <Text
-              style={styles.emptyText}
+              style={
+                styles.emptyText
+              }
             >
               Add your RC, insurance or PUC
               to start tracking expiry dates.
             </Text>
-
           </View>
-
         ) : (
-
           documents.map(
             (document) => {
-
               const status =
                 getDocumentStatus(
                   document.expiry_date
@@ -910,7 +1173,6 @@ export default function DocumentsScreen() {
                     styles.documentCard
                   }
                 >
-
                   {/* TOP */}
 
                   <View
@@ -918,7 +1180,6 @@ export default function DocumentsScreen() {
                       styles.documentTop
                     }
                   >
-
                     <View
                       style={
                         styles.documentIcon
@@ -949,7 +1210,9 @@ export default function DocumentsScreen() {
                           styles.documentType
                         }
                       >
-                        {document.document_type}
+                        {
+                          document.document_type
+                        }
                       </Text>
 
                       <Text
@@ -973,10 +1236,11 @@ export default function DocumentsScreen() {
                           styles.statusText
                         }
                       >
-                        {status.text}
+                        {
+                          status.text
+                        }
                       </Text>
                     </View>
-
                   </View>
 
                   {/* DATES */}
@@ -988,9 +1252,10 @@ export default function DocumentsScreen() {
                   />
 
                   <View
-                    style={styles.dateRow}
+                    style={
+                      styles.dateRow
+                    }
                   >
-
                     <View>
                       <Text
                         style={
@@ -1005,8 +1270,10 @@ export default function DocumentsScreen() {
                           styles.dateValue
                         }
                       >
-                        {document.issue_date ||
-                          '-'}
+                        {
+                          document.issue_date ||
+                          '-'
+                        }
                       </Text>
                     </View>
 
@@ -1028,14 +1295,15 @@ export default function DocumentsScreen() {
                           styles.dateValue
                         }
                       >
-                        {document.expiry_date ||
-                          '-'}
+                        {
+                          document.expiry_date ||
+                          '-'
+                        }
                       </Text>
                     </View>
-
                   </View>
 
-                  {/* VIEW DOCUMENT */}
+                  {/* VIEW */}
 
                   {document.document_url && (
                     <Pressable
@@ -1067,7 +1335,7 @@ export default function DocumentsScreen() {
                     </Pressable>
                   )}
 
-                  {/* DELETE DOCUMENT */}
+                  {/* DELETE */}
 
                   <Pressable
                     style={
@@ -1087,18 +1355,17 @@ export default function DocumentsScreen() {
                       Delete Document
                     </Text>
                   </Pressable>
-
                 </View>
               );
             }
           )
-
         )}
 
         {/* INFO */}
 
-        <View style={styles.infoCard}>
-
+        <View
+          style={styles.infoCard}
+        >
           <Text
             style={styles.infoTitle}
           >
@@ -1113,9 +1380,7 @@ export default function DocumentsScreen() {
             is valid, expiring soon or already
             expired.
           </Text>
-
         </View>
-
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -1139,6 +1404,10 @@ const styles = StyleSheet.create({
     paddingTop: 55,
     paddingBottom: 60,
   },
+
+  // --------------------------------
+  // HEADER
+  // --------------------------------
 
   header: {
     flexDirection: 'row',
@@ -1174,6 +1443,10 @@ const styles = StyleSheet.create({
     width: 42,
   },
 
+  // --------------------------------
+  // TITLE
+  // --------------------------------
+
   title: {
     color: '#FFFFFF',
     fontSize: 32,
@@ -1185,8 +1458,54 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     marginTop: 8,
-    marginBottom: 25,
+    marginBottom: 18,
   },
+
+  // --------------------------------
+  // SELECTED VEHICLE
+  // --------------------------------
+
+  selectedVehicleCard: {
+    backgroundColor: '#111111',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: '#292929',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  selectedVehicleLabel: {
+    color: '#666666',
+    fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
+
+  selectedVehicleName: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 5,
+  },
+
+  selectedVehicleRegistration: {
+    color: '#666666',
+    fontSize: 11,
+    marginTop: 3,
+  },
+
+  selectedVehicleCheck: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+
+  // --------------------------------
+  // SUMMARY
+  // --------------------------------
 
   summaryCard: {
     backgroundColor: '#111111',
@@ -1219,6 +1538,10 @@ const styles = StyleSheet.create({
     marginHorizontal: 45,
   },
 
+  // --------------------------------
+  // ADD BUTTON
+  // --------------------------------
+
   addButton: {
     height: 56,
     backgroundColor: '#FFFFFF',
@@ -1240,6 +1563,10 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 25,
   },
+
+  // --------------------------------
+  // FORM
+  // --------------------------------
 
   formCard: {
     backgroundColor: '#111111',
@@ -1345,6 +1672,10 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
 
+  // --------------------------------
+  // SAVE
+  // --------------------------------
+
   saveButton: {
     height: 55,
     backgroundColor: '#FFFFFF',
@@ -1352,6 +1683,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 24,
+  },
+
+  buttonDisabled: {
+    opacity: 0.6,
   },
 
   saveText: {
@@ -1367,6 +1702,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+
+  // --------------------------------
+  // LIST
+  // --------------------------------
 
   listHeader: {
     flexDirection: 'row',
@@ -1490,6 +1829,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#191919',
   },
 
+  // --------------------------------
+  // DATES
+  // --------------------------------
+
   dateDivider: {
     height: 1,
     backgroundColor: '#292929',
@@ -1519,6 +1862,10 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
 
+  // --------------------------------
+  // VIEW
+  // --------------------------------
+
   viewButton: {
     height: 46,
     backgroundColor: '#FFFFFF',
@@ -1541,7 +1888,9 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
 
-  // DELETE BUTTON — RED
+  // --------------------------------
+  // DELETE
+  // --------------------------------
 
   deleteButton: {
     height: 46,
@@ -1561,6 +1910,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+
+  // --------------------------------
+  // INFO
+  // --------------------------------
 
   infoCard: {
     backgroundColor: '#0D0D0D',
@@ -1583,5 +1936,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     marginTop: 8,
+  },
+
+  // --------------------------------
+  // EMPTY
+  // --------------------------------
+
+  empty: {
+    flex: 1,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 25,
+  },
+
+  emptyTitle: {
+    color: '#FFFFFF',
+    fontSize: 23,
+    fontWeight: '800',
+  },
+
+  button: {
+    marginTop: 20,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 15,
+  },
+
+  buttonText: {
+    color: '#000000',
+    fontSize: 16,
+    fontWeight: '800',
   },
 });
