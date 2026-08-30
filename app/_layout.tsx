@@ -1,11 +1,17 @@
 import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { VehicleProvider } from '@/context/VehicleContext';
+import { registerForPushNotificationsAsync } from '@/lib/notifications';
 
 export default function RootLayout() {
+  useEffect(() => {
+    registerForPushNotificationsAsync();
+  }, []);
+
   return (
     <ThemeProvider value={DarkTheme}>
       <VehicleProvider>
@@ -23,7 +29,7 @@ export default function RootLayout() {
 
           <Stack.Screen name="(tabs)" />
 
-          <Stack.Screen name="vehicle" />
+          
 
           <Stack.Screen
             name="modal"
