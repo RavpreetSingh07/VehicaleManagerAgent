@@ -45,3 +45,6 @@ vehiclemanageragent-firebase-adminsdk-fbsvc-0c10086499.json
 
 # Firebase service account private keys
 *firebase-adminsdk*.json
+
+# Firebase Android config
+google-services.json
