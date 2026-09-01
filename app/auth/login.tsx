@@ -11,15 +11,20 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+import {
+  registerForPushNotificationsAsync,
+} from '../../lib/notifications';
 import { supabase } from '../../lib/supabase';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
 
   const login = async () => {
-    if (!email || !password) {
+    if (!email.trim() || !password) {
       Alert.alert(
         'Missing details',
         'Please enter your email and password.'
@@ -27,23 +32,62 @@ export default function LoginScreen() {
       return;
     }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    setLoggingIn(true);
 
-    if (error) {
-      Alert.alert('Login failed', error.message);
-      return;
+    try {
+      const {
+        error,
+      } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        Alert.alert(
+          'Login failed',
+          error.message
+        );
+        return;
+      }
+
+      // --------------------------------
+      // REGISTER PUSH NOTIFICATIONS
+      // AFTER SUCCESSFUL LOGIN
+      // --------------------------------
+
+      await registerForPushNotificationsAsync();
+
+      // --------------------------------
+      // GO TO APP
+      // --------------------------------
+
+      router.replace('/(tabs)');
+    } catch (error) {
+      console.log(
+        'Login error:',
+        error
+      );
+
+      Alert.alert(
+        'Login failed',
+        'Something went wrong while logging in.'
+      );
+    } finally {
+      setLoggingIn(false);
     }
-
-    router.replace('/(tabs)');
   };
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#000000' }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{
+        flex: 1,
+        backgroundColor: '#000000',
+      }}
+      behavior={
+        Platform.OS === 'ios'
+          ? 'padding'
+          : 'height'
+      }
     >
       <ScrollView
         contentContainerStyle={styles.container}
@@ -51,13 +95,17 @@ export default function LoginScreen() {
       >
         <Text style={styles.logo}>VMA</Text>
 
-        <Text style={styles.title}>Welcome Back</Text>
+        <Text style={styles.title}>
+          Welcome Back
+        </Text>
 
         <Text style={styles.subtitle}>
           Login to your Vehicle Manager
         </Text>
 
-        <Text style={styles.label}>Email</Text>
+        <Text style={styles.label}>
+          Email
+        </Text>
 
         <TextInput
           style={styles.input}
@@ -68,9 +116,12 @@ export default function LoginScreen() {
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
+          editable={!loggingIn}
         />
 
-        <Text style={styles.label}>Password</Text>
+        <Text style={styles.label}>
+          Password
+        </Text>
 
         <View style={styles.passwordContainer}>
           <TextInput
@@ -80,26 +131,44 @@ export default function LoginScreen() {
             value={password}
             onChangeText={setPassword}
             secureTextEntry={!showPassword}
+            editable={!loggingIn}
           />
 
           <Pressable
-            onPress={() => setShowPassword(!showPassword)}
+            onPress={() =>
+              setShowPassword(!showPassword)
+            }
+            disabled={loggingIn}
           >
             <Text style={styles.eyeText}>
-              {showPassword ? 'Hide' : 'Show'}
+              {showPassword
+                ? 'Hide'
+                : 'Show'}
             </Text>
           </Pressable>
         </View>
 
         <Pressable
-          style={styles.button}
+          style={[
+            styles.button,
+            loggingIn &&
+              styles.buttonDisabled,
+          ]}
           onPress={login}
+          disabled={loggingIn}
         >
-          <Text style={styles.buttonText}>Login</Text>
+          <Text style={styles.buttonText}>
+            {loggingIn
+              ? 'Logging in...'
+              : 'Login'}
+          </Text>
         </Pressable>
 
         <Pressable
-          onPress={() => router.push('/auth/signup')}
+          onPress={() =>
+            router.push('/auth/signup')
+          }
+          disabled={loggingIn}
         >
           <Text style={styles.signupText}>
             New to VMA? Create an account
@@ -189,6 +258,10 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     marginTop: 30,
+  },
+
+  buttonDisabled: {
+    opacity: 0.6,
   },
 
   buttonText: {

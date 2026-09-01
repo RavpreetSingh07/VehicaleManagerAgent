@@ -48,3 +48,6 @@ vehiclemanageragent-firebase-adminsdk-fbsvc-0c10086499.json
 
 # Firebase Android config
 google-services.json
+
+# Backend environment
+backend/.env
